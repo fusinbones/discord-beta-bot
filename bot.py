@@ -1996,10 +1996,30 @@ class BetaTestingBot(commands.Bot):
             # Handle DMs for ambassador submissions
             if isinstance(message.channel, discord.DMChannel):
                 try:
-                    with sqlite3.connect('ambassador_program.db') as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
-                        ambassador = cursor.fetchone()
+                    ambassador = None
+                    
+                    # Check Supabase first (persistent storage)
+                    if self.ambassador_program.supabase:
+                        try:
+                            result = self.ambassador_program.supabase.table('ambassadors').select('*').eq('discord_id', str(message.author.id)).eq('status', 'active').execute()
+                            if result.data:
+                                ambassador = result.data[0]
+                                # Convert to tuple format for compatibility
+                                ambassador = (
+                                    ambassador['discord_id'], ambassador['username'], ambassador['social_handles'],
+                                    ambassador['target_platforms'], ambassador['joined_date'], ambassador['total_points'],
+                                    ambassador['current_month_points'], ambassador['consecutive_months'],
+                                    ambassador['reward_tier'], ambassador['status']
+                                )
+                        except Exception as e:
+                            print(f"⚠️ Supabase lookup failed: {e}")
+                    
+                    # Fallback to local SQLite if Supabase failed or no data
+                    if not ambassador:
+                        with sqlite3.connect('ambassador_program.db') as conn:
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
+                            ambassador = cursor.fetchone()
                     
                     if ambassador:
                         await handle_ambassador_submission(message, ambassador)
@@ -5023,7 +5043,7 @@ def has_staff_role(user, guild=None):
     return False
 
 @bot.command(name='ambassador')
-async def ambassador_command(ctx, action=None, user: discord.Member = None, *, platforms=None):
+async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
     """Ambassador Program management commands"""
     # Check Staff role permissions (works in DMs and guilds)
     if not has_staff_role(ctx.author, ctx.guild):
@@ -5031,8 +5051,51 @@ async def ambassador_command(ctx, action=None, user: discord.Member = None, *, p
         return
     
     if action == "add" and user and platforms:
+        # Convert user string to Member object if needed
+        if isinstance(user, str):
+            # Remove @ symbol if present
+            user_str = user.replace('@', '').replace('<', '').replace('>', '')
+            
+            # Try to find member by username or ID
+            member = None
+            if user_str.isdigit():
+                # It's a user ID
+                member = ctx.guild.get_member(int(user_str))
+            else:
+                # It's a username, search by display name or username
+                for m in ctx.guild.members:
+                    if m.display_name.lower() == user_str.lower() or m.name.lower() == user_str.lower():
+                        member = m
+                        break
+            
+            if not member:
+                await ctx.send(f"❌ Could not find member: {user}")
+                return
+            user = member
+        
         # Add new ambassador
         try:
+            # Store in Supabase first (persistent)
+            if bot.ambassador_program.supabase:
+                try:
+                    supabase_data = {
+                        'discord_id': str(user.id),
+                        'username': user.display_name,
+                        'social_handles': platforms,
+                        'target_platforms': platforms,
+                        'joined_date': datetime.now().isoformat(),
+                        'total_points': 0,
+                        'current_month_points': 0,
+                        'consecutive_months': 0,
+                        'reward_tier': 'none',
+                        'status': 'active'
+                    }
+                    bot.ambassador_program.supabase.table('ambassadors').upsert(supabase_data).execute()
+                    print(f"✅ Ambassador stored in Supabase: {user.display_name}")
+                except Exception as e:
+                    print(f"⚠️ Supabase storage failed: {e}")
+            
+            # Also store in local SQLite as backup
             with sqlite3.connect('ambassador_program.db') as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
@@ -5040,10 +5103,10 @@ async def ambassador_command(ctx, action=None, user: discord.Member = None, *, p
                         discord_id, username, social_handles, target_platforms, 
                         joined_date, total_points, current_month_points, 
                         consecutive_months, reward_tier, status
-                    ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 'none', 'active')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    str(user.id), user.display_name, "", platforms,
-                    datetime.now().isoformat()
+                    str(user.id), user.display_name, platforms, platforms,
+                    datetime.now().isoformat(), 0, 0, 0, 'none', 'active'
                 ))
                 conn.commit()
             
