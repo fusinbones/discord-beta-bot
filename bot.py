@@ -1965,6 +1965,14 @@ class BetaTestingBot(commands.Bot):
         if hasattr(self, 'ambassador_program') and not self.ambassador_program.monthly_check.is_running():
             self.ambassador_program.monthly_check.start()
             print('✅ Ambassador Program monthly check task started')
+            
+        # Initialize Ambassador Program database
+        if hasattr(self, 'ambassador_program'):
+            self.ambassador_program.init_local_database()
+            print('✅ Ambassador Program database initialized')
+            
+        # Send startup notification to beta channels
+        await self.send_startup_notification()
         
         # Load configuration
         await self.load_config()
@@ -4948,11 +4956,28 @@ async def sync_missed_bugs(ctx, hours: int = 24):
 
 # === AMBASSADOR PROGRAM COMMANDS ===
 
+def has_staff_role(user, guild=None):
+    """Check if user has Staff role or manage_guild permissions"""
+    if guild:
+        # Check in guild context
+        member = guild.get_member(user.id)
+        if member:
+            return any(role.name.lower() == "staff" for role in member.roles) or member.guild_permissions.manage_guild
+    else:
+        # Check across all mutual guilds for DM context
+        for guild in bot.guilds:
+            member = guild.get_member(user.id)
+            if member:
+                if any(role.name.lower() == "staff" for role in member.roles) or member.guild_permissions.manage_guild:
+                    return True
+    return False
+
 @bot.command(name='ambassador')
 async def ambassador_command(ctx, action=None, user: discord.Member = None, *, platforms=None):
     """Ambassador Program management commands"""
-    if not ctx.author.guild_permissions.manage_guild:
-        await ctx.send("❌ You need Manage Server permissions to use ambassador commands.")
+    # Check Staff role permissions (works in DMs and guilds)
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ You need the Staff role or Manage Server permissions to use ambassador commands.")
         return
     
     if action == "add" and user and platforms:
@@ -5037,6 +5062,9 @@ async def ambassador_command(ctx, action=None, user: discord.Member = None, *, p
             with sqlite3.connect('ambassador_program.db') as conn:
                 cursor = conn.cursor()
                 cursor.execute('UPDATE ambassadors SET status = "inactive" WHERE discord_id = ?', (str(user.id),))
+                if cursor.rowcount == 0:
+                    await ctx.send(f"❌ {user.display_name} is not currently an ambassador.")
+                    return
                 conn.commit()
             
             await ctx.send(f"✅ {user.display_name} has been removed from the ambassador program.")
@@ -5064,8 +5092,8 @@ async def ambassador_command(ctx, action=None, user: discord.Member = None, *, p
 @bot.command(name='ambassadors')
 async def ambassadors_report(ctx, action=None):
     """Generate ambassador reports"""
-    if not ctx.author.guild_permissions.manage_guild:
-        await ctx.send("❌ You need Manage Server permissions to view ambassador reports.")
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ You need the Staff role or Manage Server permissions to view ambassador reports.")
         return
     
     if action == "report":
@@ -5117,8 +5145,8 @@ async def ambassadors_report(ctx, action=None):
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
     """Get detailed ambassador information"""
-    if not ctx.author.guild_permissions.manage_guild:
-        await ctx.send("❌ You need Manage Server permissions to view ambassador details.")
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ You need the Staff role or Manage Server permissions to view ambassador details.")
         return
     
     if not user:
@@ -5180,8 +5208,8 @@ async def ambassador_detail(ctx, user: discord.Member = None):
 @bot.command(name='ambassador-recover')
 async def ambassador_recover(ctx):
     """Recover ambassador submissions from Discord logs"""
-    if not ctx.author.guild_permissions.manage_guild:
-        await ctx.send("❌ You need Manage Server permissions to use recovery commands.")
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ You need the Staff role or Manage Server permissions to use recovery commands.")
         return
     
     try:
@@ -5211,8 +5239,8 @@ async def ambassador_recover(ctx):
 @bot.command(name='ambassador-docs')
 async def ambassador_docs_sync(ctx):
     """Manually sync ambassador report to Google Docs"""
-    if not ctx.author.guild_permissions.manage_guild:
-        await ctx.send("❌ You need Manage Server permissions to sync reports.")
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ You need the Staff role or Manage Server permissions to sync reports.")
         return
     
     try:
@@ -5248,6 +5276,67 @@ async def ambassador_docs_sync(ctx):
         
     except Exception as e:
         await ctx.send(f"❌ Error syncing to Google Docs: {e}")
+
+@bot.command(name='help')
+async def help_command(ctx, topic=None):
+    """Help command with ambassador program support"""
+    if topic and topic.lower() == "ambassador":
+        # Check if user has staff permissions
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ Ambassador help is only available to Staff members.")
+            return
+        
+        embed = discord.Embed(
+            title="🏛️ Ambassador Program - Staff Commands",
+            description="All commands work in DMs or server channels",
+            color=0x3498db
+        )
+        
+        embed.add_field(
+            name="👥 Ambassador Management",
+            value="""
+            `!ambassador add @user platforms` - Add new ambassador
+            `!ambassador remove @user` - Remove ambassador
+            
+            **Example:** `!ambassador add @john YouTube, Instagram`
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📊 Reports & Analytics",
+            value="""
+            `!ambassadors report` - View current leaderboard
+            `!ambassador-detail @user` - Detailed ambassador info
+            `!ambassador-docs` - Sync report to Google Docs
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔧 Administration",
+            value="""
+            `!ambassador-recover` - Recover data from Discord logs
+            `help ambassador` - Show this help (DM only)
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💡 Tips",
+            value="""
+            • All commands work via DM to Jim
+            • Ambassadors submit content by DMing Jim URLs or screenshots
+            • Monthly goal: 50+ points to maintain status
+            • Gemini Vision AI analyzes screenshots automatically
+            """,
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+    else:
+        # Regular help command (existing functionality)
+        pass
 
 # Handle DMs and Ambassador Program channel monitoring
 @bot.event
