@@ -1971,11 +1971,11 @@ class BetaTestingBot(commands.Bot):
             self.ambassador_program.init_local_database()
             print('✅ Ambassador Program database initialized')
             
+        # Load configuration first
+        await self.load_config()
+        
         # Send startup notification to beta channels
         await self.send_startup_notification()
-        
-        # Load configuration
-        await self.load_config()
         
         # Scan recent history silently (no announcements)
         await self.scan_recent_history_silent()
@@ -2338,7 +2338,48 @@ class BetaTestingBot(commands.Bot):
                 self.beta_tester_role_name = config.get('beta_tester_role_name', 'beta tester')
                 self.beta_staff_role_name = config.get('staff_role_name', 'staff')
         except FileNotFoundError:
-            print("Config file not found. Using default settings.")
+            print("⚠️ config.json not found. Using default settings.")
+            self.beta_channels = []
+    
+    async def send_startup_notification(self):
+        """Send startup notification to all beta channels"""
+        if not self.beta_channels:
+            print("⚠️ No beta channels configured for startup notifications")
+            return
+            
+        embed = discord.Embed(
+            title="🤖 Jim is Online!",
+            description="Beta Testing Assistant is ready to help with bug reports and testing coordination.",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="🏛️ Ambassador Program",
+            value="Ready to process submissions and track ambassador activities",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📊 Features Active",
+            value="• Bug report analysis\n• Store monitoring\n• Ambassador tracking\n• Natural conversation support",
+            inline=False
+        )
+        
+        embed.set_footer(text="Jim the Mentor • Ready for Beta Testing")
+        
+        notifications_sent = 0
+        for guild in self.guilds:
+            for channel_id in self.beta_channels:
+                try:
+                    channel = guild.get_channel(int(channel_id))
+                    if channel:
+                        await channel.send(embed=embed)
+                        notifications_sent += 1
+                        print(f"✅ Startup notification sent to #{channel.name} in {guild.name}")
+                except Exception as e:
+                    print(f"❌ Failed to send startup notification to channel {channel_id}: {e}")
+        
+        print(f"📢 Startup notifications sent to {notifications_sent} beta channels")
     
     async def on_message(self, message):
         # Don't respond to bot messages

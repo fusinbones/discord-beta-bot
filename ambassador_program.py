@@ -299,12 +299,16 @@ class AmbassadorProgram:
             
             # Check Supabase if available
             if self.supabase:
-                result = self.supabase.table('submissions').select('id').eq('ambassador_id', ambassador_id).or_(
-                    f'screenshot_hash.eq.{content_hash},url.eq.{content_hash}'
-                ).execute()
-                
-                if result.data:
-                    return True
+                try:
+                    result = self.supabase.table('submissions').select('id').eq('ambassador_id', ambassador_id).or_(
+                        f'screenshot_hash.eq.{content_hash},url.eq.{content_hash}'
+                    ).execute()
+                    
+                    if result.data:
+                        return True
+                except Exception as supabase_error:
+                    print(f"⚠️ Supabase check failed, using local database only: {supabase_error}")
+                    # Continue with local database only
             
             return False
             
@@ -342,20 +346,27 @@ class AmbassadorProgram:
             
             # Store in Supabase if available
             if self.supabase:
-                self.supabase.table('submissions').insert({
-                    'ambassador_id': submission.ambassador_id,
-                    'platform': submission.platform.value,
-                    'post_type': submission.post_type.value,
-                    'url': submission.url,
-                    'screenshot_hash': submission.screenshot_hash,
-                    'engagement_data': submission.engagement.__dict__,
-                    'content_preview': submission.content_preview,
-                    'timestamp': submission.timestamp.isoformat(),
-                    'points_awarded': submission.points_awarded,
-                    'is_duplicate': submission.is_duplicate,
-                    'validity_status': submission.validity_status,
-                    'gemini_analysis': submission.gemini_analysis
-                }).execute()
+                try:
+                    supabase_data = {
+                        'ambassador_id': submission.ambassador_id,
+                        'platform': submission.platform,
+                        'post_type': submission.post_type,
+                        'url': submission.url,
+                        'screenshot_hash': submission.screenshot_hash,
+                        'points_awarded': submission.points_awarded,
+                        'timestamp': submission.timestamp.isoformat(),
+                        'validity_status': submission.validity_status,
+                        'fraud_score': submission.fraud_score,
+                        'engagement_bonus': submission.engagement_bonus
+                    }
+                    
+                    result = self.supabase.table('submissions').insert(supabase_data).execute()
+                    print(f"✅ Stored in Supabase: {submission.url or 'Screenshot'}")
+                except Exception as supabase_error:
+                    print(f"⚠️ Supabase storage failed, using local database only: {supabase_error}")
+                    # Continue with local database only
+            
+            return True
             
             # Update ambassador points
             await self.update_ambassador_points(submission.ambassador_id, submission.points_awarded)
