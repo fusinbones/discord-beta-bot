@@ -2024,6 +2024,20 @@ class BetaTestingBot(commands.Bot):
                     if ambassador:
                         await handle_ambassador_submission(message, ambassador)
                         return  # Don't process further if it's an ambassador submission
+                    else:
+                        # Not an ambassador, send help message for DMs
+                        embed = discord.Embed(
+                            title="👋 Hello!",
+                            description="I'm Jim, the beta testing assistant. To submit content as an ambassador, you need to be registered first.",
+                            color=0x3498db
+                        )
+                        embed.add_field(
+                            name="📝 How to become an ambassador",
+                            value="Ask a Staff member to add you with: `!ambassador add @yourname platforms`",
+                            inline=False
+                        )
+                        await message.channel.send(embed=embed)
+                        return
                 except Exception as e:
                     print(f"❌ Error checking ambassador status: {e}")
             
@@ -5058,15 +5072,21 @@ async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
             
             # Try to find member by username or ID
             member = None
-            if user_str.isdigit():
-                # It's a user ID
-                member = ctx.guild.get_member(int(user_str))
-            else:
-                # It's a username, search by display name or username
-                for m in ctx.guild.members:
-                    if m.display_name.lower() == user_str.lower() or m.name.lower() == user_str.lower():
-                        member = m
-                        break
+            
+            # Search across all guilds the bot is in
+            for guild in bot.guilds:
+                if user_str.isdigit():
+                    # It's a user ID
+                    member = guild.get_member(int(user_str))
+                else:
+                    # It's a username, search by display name or username
+                    for m in guild.members:
+                        if m.display_name.lower() == user_str.lower() or m.name.lower() == user_str.lower():
+                            member = m
+                            break
+                
+                if member:
+                    break
             
             if not member:
                 await ctx.send(f"❌ Could not find member: {user}")
