@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "functions": {
+    "api/discord.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/discord",
+      "dest": "/api/discord.py"
+    }
+  ],
+  "env": {
+    "DISCORD_BOT_TOKEN": "@discord_bot_token",
+    "GEMINI_API_KEY": "@gemini_api_key",
+    "SUPABASE_URL": "@supabase_url",
+    "SUPABASE_ANON_KEY": "@supabase_anon_key",
+    "AMBASSADOR_GOOGLE_DOC_ID": "@ambassador_google_doc_id"
+  }
+}

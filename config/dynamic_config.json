@@ -1,0 +1,50 @@
+{
+  "poshmark_settings": {
+    "json_extraction": {
+      "enabled": false
+    },
+    "fallback_crawl": {
+      "enabled": false
+    },
+    "simple_scrape": {
+      "timeout": 20000,
+      "scroll_actions": 6,
+      "wait_between_scrolls": 3000,
+      "scroll_amounts": [
+        2000,
+        4000,
+        6000,
+        8000,
+        10000,
+        12000
+      ],
+      "wait_for": 8000,
+      "force_aggressive": false
+    },
+    "api_settings": {
+      "firecrawl_base_url": "https://api.firecrawl.dev/v1",
+      "max_retries": 2,
+      "retry_delay": 20
+    },
+    "poshmark_settings": {
+      "json_extraction": {
+        "enabled": false
+      },
+      "simple_scrape": {
+        "timeout": 30000,
+        "wait_for": 8000
+      }
+    }
+  },
+  "api_settings": {
+    "firecrawl_base_url": "https://api.firecrawl.dev/v1",
+    "claude_model": "claude-3-5-sonnet-20241022",
+    "max_retries": 2,
+    "retry_delay": 20
+  },
+  "debug_settings": {
+    "verbose_logging": true,
+    "save_raw_responses": false,
+    "log_api_calls": true
+  }
+}
