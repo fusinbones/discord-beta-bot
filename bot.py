@@ -5277,66 +5277,62 @@ async def ambassador_docs_sync(ctx):
     except Exception as e:
         await ctx.send(f"❌ Error syncing to Google Docs: {e}")
 
-@bot.command(name='help')
-async def help_command(ctx, topic=None):
-    """Help command with ambassador program support"""
-    if topic and topic.lower() == "ambassador":
-        # Check if user has staff permissions
-        if not has_staff_role(ctx.author, ctx.guild):
-            await ctx.send("❌ Ambassador help is only available to Staff members.")
-            return
+@bot.command(name='helpambassador')
+async def help_ambassador_command(ctx):
+    """Ambassador Program help for staff members"""
+    # Check if user has staff permissions
+    if not has_staff_role(ctx.author, ctx.guild):
+        await ctx.send("❌ Ambassador help is only available to Staff members.")
+        return
+    
+    embed = discord.Embed(
+        title="🏛️ Ambassador Program - Staff Commands",
+        description="All commands work in DMs or server channels",
+        color=0x3498db
+    )
+    
+    embed.add_field(
+        name="👥 Ambassador Management",
+        value="""
+        `!ambassador add @user platforms` - Add new ambassador
+        `!ambassador remove @user` - Remove ambassador
         
-        embed = discord.Embed(
-            title="🏛️ Ambassador Program - Staff Commands",
-            description="All commands work in DMs or server channels",
-            color=0x3498db
-        )
-        
-        embed.add_field(
-            name="👥 Ambassador Management",
-            value="""
-            `!ambassador add @user platforms` - Add new ambassador
-            `!ambassador remove @user` - Remove ambassador
-            
-            **Example:** `!ambassador add @john YouTube, Instagram`
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="📊 Reports & Analytics",
-            value="""
-            `!ambassadors report` - View current leaderboard
-            `!ambassador-detail @user` - Detailed ambassador info
-            `!ambassador-docs` - Sync report to Google Docs
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🔧 Administration",
-            value="""
-            `!ambassador-recover` - Recover data from Discord logs
-            `help ambassador` - Show this help (DM only)
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="💡 Tips",
-            value="""
-            • All commands work via DM to Jim
-            • Ambassadors submit content by DMing Jim URLs or screenshots
-            • Monthly goal: 50+ points to maintain status
-            • Gemini Vision AI analyzes screenshots automatically
-            """,
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
-    else:
-        # Regular help command (existing functionality)
-        pass
+        **Example:** `!ambassador add @john YouTube, Instagram`
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 Reports & Analytics",
+        value="""
+        `!ambassadors report` - View current leaderboard
+        `!ambassador-detail @user` - Detailed ambassador info
+        `!ambassador-docs` - Sync report to Google Docs
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔧 Administration",
+        value="""
+        `!ambassador-recover` - Recover data from Discord logs
+        `!helpambassador` - Show this help (works in DM)
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="💡 Tips",
+        value="""
+        • All commands work via DM to Jim
+        • Ambassadors submit content by DMing Jim URLs or screenshots
+        • Monthly goal: 50+ points to maintain status
+        • Gemini Vision AI analyzes screenshots automatically
+        """,
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
 
 # Handle DMs and Ambassador Program channel monitoring
 @bot.event
