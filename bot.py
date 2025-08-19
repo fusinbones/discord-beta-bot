@@ -1961,6 +1961,11 @@ class BetaTestingBot(commands.Bot):
         print(f'Bot User ID: {self.user.id}')
         print(f'Bot Username: {self.user.name}')
         
+        # Start Ambassador Program monthly check task
+        if hasattr(self, 'ambassador_program') and not self.ambassador_program.monthly_check.is_running():
+            self.ambassador_program.monthly_check.start()
+            print('✅ Ambassador Program monthly check task started')
+        
         # Load configuration
         await self.load_config()
         

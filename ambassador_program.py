@@ -125,8 +125,7 @@ class AmbassadorProgram:
         # Initialize local database for fallback
         self.init_local_database()
         
-        # Start monitoring task
-        self.monthly_check.start()
+        # Don't start task here - will be started in on_ready event
     
     def init_local_database(self):
         """Initialize local SQLite database for ambassador data"""
