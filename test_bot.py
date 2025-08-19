@@ -23,9 +23,14 @@ async def ping(ctx):
     await ctx.send('Pong! Bot is working on Railway!')
 
 if __name__ == "__main__":
+    print("=== Environment Variables Debug ===")
+    print(f"Available env vars: {list(os.environ.keys())}")
+    print(f"DISCORD_BOT_TOKEN exists: {'DISCORD_BOT_TOKEN' in os.environ}")
+    
     token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
         print("ERROR: DISCORD_BOT_TOKEN not found in environment variables")
+        print("Please add DISCORD_BOT_TOKEN in Railway Variables tab")
         exit(1)
     
     print("Starting minimal test bot...")
