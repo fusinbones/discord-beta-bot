@@ -2025,19 +2025,22 @@ class BetaTestingBot(commands.Bot):
                         await handle_ambassador_submission(message, ambassador)
                         return  # Don't process further if it's an ambassador submission
                     else:
-                        # Not an ambassador, send help message for DMs
-                        embed = discord.Embed(
-                            title="👋 Hello!",
-                            description="I'm Jim, the beta testing assistant. To submit content as an ambassador, you need to be registered first.",
-                            color=0x3498db
-                        )
-                        embed.add_field(
-                            name="📝 How to become an ambassador",
-                            value="Ask a Staff member to add you with: `!ambassador add @yourname platforms`",
-                            inline=False
-                        )
-                        await message.channel.send(embed=embed)
-                        return
+                        # Not an ambassador, check if it's a command before sending help
+                        if not message.content.startswith('!'):
+                            # Not a command, send help message for DMs
+                            embed = discord.Embed(
+                                title="👋 Hello!",
+                                description="I'm Jim, the beta testing assistant. To submit content as an ambassador, you need to be registered first.",
+                                color=0x3498db
+                            )
+                            embed.add_field(
+                                name="📝 How to become an ambassador",
+                                value="Ask a Staff member to add you with: `!ambassador add @yourname platforms`",
+                                inline=False
+                            )
+                            await message.channel.send(embed=embed)
+                            return
+                        # If it's a command, let it fall through to command processing
                 except Exception as e:
                     print(f"❌ Error checking ambassador status: {e}")
             
