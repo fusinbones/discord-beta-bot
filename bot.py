@@ -1992,34 +1992,77 @@ class BetaTestingBot(commands.Bot):
             # Don't respond to ourselves or other bots
             if message.author == self.user or message.author.bot:
                 return
+            
+            # Handle DMs for ambassador submissions
+            if isinstance(message.channel, discord.DMChannel):
+                try:
+                    with sqlite3.connect('ambassador_program.db') as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
+                        ambassador = cursor.fetchone()
+                    
+                    if ambassador:
+                        await handle_ambassador_submission(message, ambassador)
+                        return  # Don't process further if it's an ambassador submission
+                except Exception as e:
+                    print(f"❌ Error checking ambassador status: {e}")
+            
+            # Handle Ambassador Program category channels
+            elif message.guild and message.channel.category and "ambassador program" in message.channel.category.name.lower():
+                try:
+                    with sqlite3.connect('ambassador_program.db') as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
+                        ambassador = cursor.fetchone()
+                    
+                    if ambassador:
+                        await handle_ambassador_submission(message, ambassador)
+                        return  # Don't process further if it's an ambassador submission
+                except Exception as e:
+                    print(f"❌ Error processing ambassador channel submission: {e}")
                 
             # Check if Jim is mentioned in the message
             if self.user in message.mentions:
                 print(f"🎯 JIM WAS MENTIONED! Processing question...")
                 
                 # Extract the question (remove the mention)
-                question = message.content.replace(f'<@!{self.user.id}>', '').replace(f'<@{self.user.id}>', '').strip()
-                print(f"📝 Question: '{question}'")
+                question = message.content
+                for mention in message.mentions:
+                    question = question.replace(f'<@{mention.id}>', '').strip()
                 
-                if not question:
-                    await message.reply("Hi there! How can I help you today? Ask me anything about the app or features!")
-                    return
-                
-                # Search for relevant answers
-                await self.handle_question(message, question)
-                return
+                if question:
+                    print(f"📝 Question extracted: {question}")
+                    
+                    # Use Gemini to generate a response
+                    try:
+                        response = self.model.generate_content(f"""
+                        You are Jim, a helpful Discord bot assistant for beta testing. A user asked: "{question}"
+                        
+                        Provide a helpful, concise response. If it's about bugs, suggest they report it properly.
+                        If it's about the app, provide general guidance. Keep responses under 200 words.
+                        """)
+                        
+                        if response and response.text:
+                            await message.reply(response.text)
+                            print(f"✅ Responded to mention with: {response.text[:100]}...")
+                        else:
+                            await message.reply("I'm here to help! Could you rephrase your question?")
+                            
+                    except Exception as e:
+                        print(f"❌ Error generating response: {e}")
+                        await message.reply("I'm having trouble processing that right now. Please try again later!")
+                        
+                return  # Don't process further if it was a mention
+            
+            # Track messages in beta channels for bug detection
+            if str(message.channel.id) in self.beta_channels:
+                await self.track_message(message)
                 
         except Exception as e:
-            print(f"❌ ERROR in on_message: {e}")
-            import traceback
-            traceback.print_exc()
-            return
-        
-        # Process commands
+            print(f"❌ Error in on_message: {e}")
+            
+        # Always process commands at the end
         await self.process_commands(message)
-        
-        # Track the message in the database
-        await self.track_message(message)
     
     async def handle_question(self, message, question):
         """Handle a question asked to Jim by searching chat history"""
@@ -2381,41 +2424,7 @@ class BetaTestingBot(commands.Bot):
         
         print(f"📢 Startup notifications sent to {notifications_sent} beta channels")
     
-    async def on_message(self, message):
-        # Don't respond to bot messages
-        if message.author.bot:
-            return
-        
-        # Track messages in beta channels
-        if str(message.channel.id) in self.beta_channels:
-            await self.track_message(message)
-        
-        # Natural conversation system - TEMPORARILY DISABLED due to inappropriate responses
-        # TODO: Fix the AI prompt and re-enable this system
-        if False and hasattr(self, 'natural_conversation_system'):
-            try:
-                if await self.natural_conversation_system.should_participate(message):
-                    # Add a small delay to seem more human
-                    await asyncio.sleep(random.uniform(1, 3))
-                    
-                    # Generate response
-                    response = await self.natural_conversation_system.generate_human_response(message)
-                    
-                    if response:
-                        await message.channel.send(response)
-                        
-                        # If it's bug-related, maybe suggest reporting it
-                        if (self.natural_conversation_system.is_bug_or_sidekick_related(message.content) 
-                            and random.random() < 0.3):
-                            await asyncio.sleep(random.uniform(2, 4))
-                            suggestion = await self.natural_conversation_system.suggest_bug_report(message)
-                            await message.channel.send(suggestion)
-                            
-            except Exception as e:
-                print(f"Error in natural conversation: {e}")
-        
-        # Process commands
-        await self.process_commands(message)
+    # Removed duplicate on_message handler - consolidated into main handler below
     
     async def track_message(self, message):
         """Track message in database with optimized async processing"""
@@ -5375,42 +5384,7 @@ async def help_ambassador_command(ctx):
     
     await ctx.send(embed=embed)
 
-# Handle DMs and Ambassador Program channel monitoring
-@bot.event
-async def on_message(message):
-    # Skip bot messages
-    if message.author.bot:
-        return
-    
-    # Handle DMs for ambassador submissions
-    if isinstance(message.channel, discord.DMChannel):
-        # Check if user is an ambassador
-        try:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
-                ambassador = cursor.fetchone()
-            
-            if ambassador:
-                await handle_ambassador_submission(message, ambassador)
-        except Exception as e:
-            print(f"❌ Error checking ambassador status: {e}")
-    
-    # Handle Ambassador Program category channels
-    elif message.guild and message.channel.category and "ambassador program" in message.channel.category.name.lower():
-        try:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
-                ambassador = cursor.fetchone()
-            
-            if ambassador:
-                await handle_ambassador_submission(message, ambassador)
-        except Exception as e:
-            print(f"❌ Error processing ambassador channel submission: {e}")
-    
-    # Process commands
-    await bot.process_commands(message)
+# Consolidated on_message handler - moved into BetaTestingBot class
 
 async def handle_ambassador_submission(message, ambassador_data):
     """Handle ambassador post submissions"""
