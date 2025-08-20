@@ -2318,6 +2318,13 @@ class BetaTestingBot(commands.Bot):
 
         CRITICAL CONTEXT: This is for Sidekick Tools - a productivity app for online sellers that helps with crosslisting, inventory management, and store automation. NOT a gaming app.
 
+        STRICT RULES:
+        1. ONLY use information provided in the context data below
+        2. NEVER mention users not listed in the context
+        3. NEVER make up conversations or activities
+        4. If no activity is provided, say "Quiet period - no beta testing activity to report"
+        5. Only reference actual usernames and messages from the context data
+
         Focus on:
         1. Key discussions or issues mentioned about Sidekick Tools features
         2. Any new bugs or problems reported with the Sidekick Tools app
@@ -2331,14 +2338,17 @@ class BetaTestingBot(commands.Bot):
           "[Username said xyz](message_link)" or "Username mentioned [this issue](message_link)"
         - Be creative with link text: "[see what they said](link)", "[check it out](link)", "[view discussion](link)"
         - Make links intuitive and natural, like: "Linda reported [a login issue](link)" or "Mike shared [great feedback](link)"
-        - Use the message links provided in the context data (format: https://discord.com/channels/guild/channel/message)
+        - Use ONLY the message links provided in the context data (format: https://discord.com/channels/guild/channel/message)
         
         Example good formats:
         - "Sarah mentioned [an interesting bug](https://discord.com/channels/123/456/789) with the crosslisting feature"
         - "Check out [Tom's feedback](https://discord.com/channels/123/456/790) on the inventory sync"
         - "Linda said [the Sidekick Tools app crashed](https://discord.com/channels/123/456/791) during store analysis"
         
-        Keep it factual, actionable, and make the links feel natural and helpful for Sidekick Tools beta testers. NEVER mention gaming or games."""
+        Keep it factual, actionable, and make the links feel natural and helpful for Sidekick Tools beta testers. NEVER mention gaming or games.
+        
+        CONTEXT DATA:
+        {context}"""
             
             ai_summary = await self.get_ai_response(ai_prompt, context)
             
@@ -2382,15 +2392,20 @@ class BetaTestingBot(commands.Bot):
         with sqlite3.connect('beta_testing.db') as conn:
             cursor = conn.cursor()
             
-            # Get recent messages with message IDs and channel IDs for linking
-            cursor.execute('''
-                SELECT message_content, username, message_id, channel_id, guild_id
-                FROM messages 
-                WHERE timestamp > ? AND message_content NOT LIKE '!%'
-                ORDER BY timestamp DESC 
-                LIMIT 15
-            ''', (time_ago,))
-            recent_messages = cursor.fetchall()
+            # Get recent messages with message IDs and channel IDs for linking - ONLY from beta channels
+            beta_channel_placeholders = ','.join(['?' for _ in self.beta_channels])
+            if beta_channel_placeholders:
+                cursor.execute(f'''
+                    SELECT message_content, username, message_id, channel_id, guild_id
+                    FROM messages 
+                    WHERE timestamp > ? AND message_content NOT LIKE '!%' 
+                    AND channel_id IN ({beta_channel_placeholders})
+                    ORDER BY timestamp DESC 
+                    LIMIT 15
+                ''', (time_ago, *self.beta_channels))
+                recent_messages = cursor.fetchall()
+            else:
+                recent_messages = []
             
             # Get recent bugs
             cursor.execute('''
@@ -2401,7 +2416,11 @@ class BetaTestingBot(commands.Bot):
             ''', (time_ago,))
             recent_bugs = cursor.fetchall()
         
-        context = f"{hours_back} hour(s) of activity:\n\n"
+        # If no activity, return explicit empty state
+        if not recent_bugs and not recent_messages:
+            return f"No beta testing activity in the last {hours_back} hour(s). Beta channels have been quiet."
+        
+        context = f"ACTUAL beta testing activity from the last {hours_back} hour(s):\n\n"
         
         if recent_bugs:
             context += "Bug Reports:\n"
@@ -2410,13 +2429,15 @@ class BetaTestingBot(commands.Bot):
             context += "\n"
         
         if recent_messages:
-            context += "Recent Messages (with source links):\n"
+            context += "Recent Messages from Beta Channels (with source links):\n"
             for msg, user, msg_id, channel_id, guild_id in recent_messages:
                 if len(msg) > 80:
                     msg = msg[:80] + "..."
                 # Create Discord message link
                 message_link = f"https://discord.com/channels/{guild_id}/{channel_id}/{msg_id}"
                 context += f"- {user}: {msg} [LINK: {message_link}]\n"
+        else:
+            context += "No recent messages in beta channels.\n"
         
         return context
     
