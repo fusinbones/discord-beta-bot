@@ -119,6 +119,8 @@ class NaturalConversationSystem:
         prompt = f"""
         You are Jim, a friendly and extremely human Discord community member who helps with Sidekick Tools app testing. 
         
+        CRITICAL CONTEXT: Sidekick Tools is a productivity app for online sellers that helps with crosslisting, inventory management, and store automation. NOT a gaming app.
+        
         IMPORTANT: Respond as if you're a real human, not an AI. Use casual language, contractions, and natural speech patterns.
         
         Recent message from {message.author.display_name}: "{message.content}"
@@ -2073,10 +2075,15 @@ class BetaTestingBot(commands.Bot):
                     # Use Gemini to generate a response
                     try:
                         response = self.model.generate_content(f"""
-                        You are Jim, a helpful Discord bot assistant for beta testing. A user asked: "{question}"
+                        You are Jim, a helpful Discord bot assistant for Sidekick Tools beta testing. 
                         
-                        Provide a helpful, concise response. If it's about bugs, suggest they report it properly.
-                        If it's about the app, provide general guidance. Keep responses under 200 words.
+                        CRITICAL CONTEXT: Sidekick Tools is a productivity app for online sellers that helps with crosslisting, inventory management, and store automation. NOT a gaming app.
+                        
+                        A user asked: "{question}"
+                        
+                        Provide a helpful, concise response about Sidekick Tools. If it's about bugs, suggest they report it properly.
+                        If it's about the app, provide guidance on Sidekick Tools features. Keep responses under 200 words.
+                        NEVER mention gaming or games.
                         """)
                         
                         if response and response.text:
@@ -2307,11 +2314,15 @@ class BetaTestingBot(commands.Bot):
             # Get AI summary of recent activity
             context = await self.get_recent_activity_context(hours_back)
             
-            ai_prompt = f"""Create a brief {period_name.lower()} update of beta testing activity. Focus on:
-        1. Key discussions or issues mentioned
-        2. Any new bugs or problems reported  
-        3. Testing progress or feedback
-        4. Encouragement for continued testing
+            ai_prompt = f"""You are creating a {period_name.lower()} update for SIDEKICK TOOLS beta testing activity.
+
+        CRITICAL CONTEXT: This is for Sidekick Tools - a productivity app for online sellers that helps with crosslisting, inventory management, and store automation. NOT a gaming app.
+
+        Focus on:
+        1. Key discussions or issues mentioned about Sidekick Tools features
+        2. Any new bugs or problems reported with the Sidekick Tools app
+        3. Testing progress or feedback on Sidekick Tools functionality
+        4. Encouragement for continued Sidekick Tools testing
         5. Note that bug reports are automatically synced to Google Sheets
         
         IMPORTANT FORMATTING RULES:
@@ -2323,11 +2334,11 @@ class BetaTestingBot(commands.Bot):
         - Use the message links provided in the context data (format: https://discord.com/channels/guild/channel/message)
         
         Example good formats:
-        - "Sarah mentioned [an interesting bug](https://discord.com/channels/123/456/789) with the new feature"
-        - "Check out [Tom's feedback](https://discord.com/channels/123/456/790) on the latest update"
-        - "Linda said [the app crashed](https://discord.com/channels/123/456/791) during testing"
+        - "Sarah mentioned [an interesting bug](https://discord.com/channels/123/456/789) with the crosslisting feature"
+        - "Check out [Tom's feedback](https://discord.com/channels/123/456/790) on the inventory sync"
+        - "Linda said [the Sidekick Tools app crashed](https://discord.com/channels/123/456/791) during store analysis"
         
-        Keep it factual, actionable, and make the links feel natural and helpful for beta testers."""
+        Keep it factual, actionable, and make the links feel natural and helpful for Sidekick Tools beta testers. NEVER mention gaming or games."""
             
             ai_summary = await self.get_ai_response(ai_prompt, context)
             
