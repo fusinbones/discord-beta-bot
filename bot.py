@@ -2068,8 +2068,17 @@ class BetaTestingBot(commands.Bot):
                             ambassador = cursor.fetchone()
                     
                     if ambassador:
-                        await handle_ambassador_submission(message, ambassador)
-                        return  # Don't process further if it's an ambassador submission
+                        # Only treat DM as a submission if it contains URLs or attachments, and is not a command
+                        import re
+                        content_no_ws = message.content.lstrip()
+                        url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+                        urls = re.findall(url_pattern, message.content)
+                        has_attachments = bool(message.attachments)
+                        if (urls or has_attachments) and not content_no_ws.startswith('!'):
+                            await handle_ambassador_submission(message, ambassador)
+                            return  # Don't process further if it's an ambassador submission
+                        # If it's a command (e.g., !mystats), let it fall through to command processing
+                        # Otherwise, quietly ignore or provide guidance below for non-ambassadors
                     else:
                         # Not an ambassador, check if it's a command before sending help
                         if not message.content.startswith('!'):
@@ -2104,8 +2113,10 @@ class BetaTestingBot(commands.Bot):
                     url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
                     urls = re.findall(url_pattern, message.content)
                     has_attachments = bool(message.attachments)
-                    
-                    if urls or has_attachments:
+                    content_no_ws = message.content.lstrip()
+
+                    # Skip submission handling if the message is a command
+                    if (urls or has_attachments) and not content_no_ws.startswith('!'):
                         with sqlite3.connect('ambassador_program.db') as conn:
                             cursor = conn.cursor()
                             cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
