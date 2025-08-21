@@ -21,19 +21,21 @@ def fix_ambassador_database():
     with sqlite3.connect('ambassador_program.db') as conn:
         cursor = conn.cursor()
         
-        # Create ambassadors table
+        # Create ambassadors table (current schema)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ambassadors (
-                discord_id TEXT PRIMARY KEY,
-                username TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_id TEXT UNIQUE NOT NULL,
+                username TEXT NOT NULL,
                 social_handles TEXT,
-                target_platforms TEXT,
-                joined_date TEXT,
-                total_points INTEGER DEFAULT 0,
+                platforms TEXT,
                 current_month_points INTEGER DEFAULT 0,
+                total_points INTEGER DEFAULT 0,
                 consecutive_months INTEGER DEFAULT 0,
                 reward_tier TEXT DEFAULT 'none',
-                status TEXT DEFAULT 'active'
+                status TEXT DEFAULT 'active',
+                weekly_posts TEXT DEFAULT '0000',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -82,8 +84,7 @@ def fix_ambassador_database():
         discord_id = "DARKTIDING_DISCORD_ID"  # Replace with actual Discord ID
         username = "darktiding"
         social_handles = "darktiding"
-        target_platforms = "instagram,tiktok,youtube"
-        joined_date = datetime.now().isoformat()
+        platforms = "instagram,tiktok,youtube"
         
         # Check if ambassador already exists
         cursor.execute('SELECT discord_id FROM ambassadors WHERE username = ?', (username,))
@@ -94,23 +95,23 @@ def fix_ambassador_database():
         else:
             cursor.execute('''
                 INSERT INTO ambassadors (
-                    discord_id, username, social_handles, target_platforms, 
-                    joined_date, total_points, current_month_points, 
-                    consecutive_months, reward_tier, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    discord_id, username, social_handles, platforms,
+                    current_month_points, total_points, consecutive_months,
+                    reward_tier, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                discord_id, username, social_handles, target_platforms,
-                joined_date, 0, 0, 0, 'none', 'active'
+                discord_id, username, social_handles, platforms,
+                0, 0, 0, 'none', 'active'
             ))
             conn.commit()
             print(f"✅ Added {username} as ambassador")
         
         # Verify the data
-        cursor.execute('SELECT * FROM ambassadors')
+        cursor.execute('SELECT discord_id, username, status FROM ambassadors')
         ambassadors = cursor.fetchall()
         print(f"\n📊 Current ambassadors in database: {len(ambassadors)}")
-        for amb in ambassadors:
-            print(f"  - {amb[1]} (ID: {amb[0]}, Status: {amb[9]})")
+        for discord_id_row, username_row, status_row in ambassadors:
+            print(f"  - {username_row} (Discord ID: {discord_id_row}, Status: {status_row})")
 
 def get_discord_id_from_beta_db():
     """Try to find darktiding's Discord ID from the main beta database"""

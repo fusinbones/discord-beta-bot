@@ -10,32 +10,48 @@ cursor = conn.cursor()
 discord_id = "REPLACE_WITH_YOUR_DISCORD_ID"  # Replace this with your actual Discord user ID
 username = "darktiding"
 social_handles = "darktiding"
-target_platforms = "instagram,tiktok,youtube"
-joined_date = datetime.now().isoformat()
+platforms = "instagram,tiktok,youtube"
 
 # Insert ambassador record
-cursor.execute('''
-    INSERT OR REPLACE INTO ambassadors (
-        discord_id, username, social_handles, target_platforms, 
-        joined_date, total_points, current_month_points, 
-        consecutive_months, reward_tier, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-''', (
-    discord_id, username, social_handles, target_platforms,
-    joined_date, 0, 0, 0, 'none', 'active'
-))
+# Detect schema
+cursor.execute("PRAGMA table_info(ambassadors)")
+cols = [row[1] for row in cursor.fetchall()]
+has_platforms = 'platforms' in cols and 'joined_date' not in cols
+
+if has_platforms:
+    cursor.execute('''
+        INSERT OR REPLACE INTO ambassadors (
+            discord_id, username, social_handles, platforms,
+            current_month_points, total_points, consecutive_months,
+            reward_tier, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        discord_id, username, social_handles, platforms,
+        0, 0, 0, 'none', 'active'
+    ))
+else:
+    cursor.execute('''
+        INSERT OR REPLACE INTO ambassadors (
+            discord_id, username, social_handles, target_platforms, 
+            joined_date, total_points, current_month_points, 
+            consecutive_months, reward_tier, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        discord_id, username, social_handles, platforms,
+        datetime.now().isoformat(), 0, 0, 0, 'none', 'active'
+    ))
 
 conn.commit()
 
 # Verify the record was added
-cursor.execute('SELECT * FROM ambassadors WHERE username = ?', (username,))
+cursor.execute('SELECT discord_id, username, status FROM ambassadors WHERE username = ?', (username,))
 ambassador = cursor.fetchone()
 
 if ambassador:
     print(f"✅ Ambassador {username} added successfully!")
     print(f"   Discord ID: {ambassador[0]}")
     print(f"   Username: {ambassador[1]}")
-    print(f"   Status: {ambassador[9]}")
+    print(f"   Status: {ambassador[2]}")
 else:
     print("❌ Failed to add ambassador")
 

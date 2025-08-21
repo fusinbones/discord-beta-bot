@@ -44,32 +44,57 @@ def sync_ambassador_data():
         # Connect to local database
         with sqlite3.connect('ambassador_program.db') as conn:
             cursor = conn.cursor()
-            
+
             # Clear local ambassadors table and repopulate from Supabase
             cursor.execute('DELETE FROM ambassadors')
-            
+
+            # Detect local schema
+            cursor.execute('PRAGMA table_info(ambassadors)')
+            cols = [row[1] for row in cursor.fetchall()]
+            has_platforms = 'platforms' in cols and 'joined_date' not in cols
+            has_target_platforms = 'target_platforms' in cols and 'joined_date' in cols
+
             for ambassador in supabase_ambassadors:
-                cursor.execute('''
-                    INSERT INTO ambassadors (
-                        discord_id, username, social_handles, target_platforms, 
-                        joined_date, total_points, current_month_points, 
-                        consecutive_months, reward_tier, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    ambassador.get('discord_id'),
-                    ambassador.get('username'),
-                    ambassador.get('social_handles'),
-                    ambassador.get('target_platforms'),
-                    ambassador.get('joined_date'),
-                    ambassador.get('total_points', 0),
-                    ambassador.get('current_month_points', 0),
-                    ambassador.get('consecutive_months', 0),
-                    ambassador.get('reward_tier', 'none'),
-                    ambassador.get('status', 'active')
-                ))
-                
+                if has_platforms:
+                    cursor.execute('''
+                        INSERT INTO ambassadors (
+                            discord_id, username, social_handles, platforms,
+                            current_month_points, total_points, consecutive_months,
+                            reward_tier, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        ambassador.get('discord_id'),
+                        ambassador.get('username'),
+                        ambassador.get('social_handles'),
+                        ambassador.get('platforms') or ambassador.get('target_platforms') or 'all',
+                        ambassador.get('current_month_points', 0),
+                        ambassador.get('total_points', 0),
+                        ambassador.get('consecutive_months', 0),
+                        ambassador.get('reward_tier', 'none'),
+                        ambassador.get('status', 'active')
+                    ))
+                elif has_target_platforms:
+                    cursor.execute('''
+                        INSERT INTO ambassadors (
+                            discord_id, username, social_handles, target_platforms,
+                            joined_date, total_points, current_month_points,
+                            consecutive_months, reward_tier, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        ambassador.get('discord_id'),
+                        ambassador.get('username'),
+                        ambassador.get('social_handles'),
+                        ambassador.get('target_platforms') or ambassador.get('platforms') or 'all',
+                        ambassador.get('joined_date') or datetime.now().isoformat(),
+                        ambassador.get('total_points', 0),
+                        ambassador.get('current_month_points', 0),
+                        ambassador.get('consecutive_months', 0),
+                        ambassador.get('reward_tier', 'none'),
+                        ambassador.get('status', 'active')
+                    ))
+
                 print(f"  ✅ Synced: {ambassador.get('username')} (ID: {ambassador.get('discord_id')})")
-            
+
             conn.commit()
             
         print(f"✅ Successfully synced {len(supabase_ambassadors)} ambassadors to local database")
@@ -93,8 +118,7 @@ def add_darktiding_to_both_databases():
         'discord_id': discord_id,
         'username': 'darktiding',
         'social_handles': 'darktiding',
-        'target_platforms': 'instagram,tiktok,youtube',
-        'joined_date': datetime.now().isoformat(),
+        'platforms': 'instagram,tiktok,youtube',
         'total_points': 0,
         'current_month_points': 0,
         'consecutive_months': 0,
@@ -119,24 +143,47 @@ def add_darktiding_to_both_databases():
     try:
         with sqlite3.connect('ambassador_program.db') as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                INSERT OR REPLACE INTO ambassadors (
-                    discord_id, username, social_handles, target_platforms, 
-                    joined_date, total_points, current_month_points, 
-                    consecutive_months, reward_tier, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                ambassador_data['discord_id'],
-                ambassador_data['username'],
-                ambassador_data['social_handles'],
-                ambassador_data['target_platforms'],
-                ambassador_data['joined_date'],
-                ambassador_data['total_points'],
-                ambassador_data['current_month_points'],
-                ambassador_data['consecutive_months'],
-                ambassador_data['reward_tier'],
-                ambassador_data['status']
-            ))
+            # Detect schema
+            cursor.execute('PRAGMA table_info(ambassadors)')
+            cols = [row[1] for row in cursor.fetchall()]
+            has_platforms = 'platforms' in cols and 'joined_date' not in cols
+            if has_platforms:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO ambassadors (
+                        discord_id, username, social_handles, platforms,
+                        current_month_points, total_points, consecutive_months,
+                        reward_tier, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ambassador_data['discord_id'],
+                    ambassador_data['username'],
+                    ambassador_data['social_handles'],
+                    ambassador_data['platforms'],
+                    ambassador_data['current_month_points'],
+                    ambassador_data['total_points'],
+                    ambassador_data['consecutive_months'],
+                    ambassador_data['reward_tier'],
+                    ambassador_data['status']
+                ))
+            else:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO ambassadors (
+                        discord_id, username, social_handles, target_platforms, 
+                        joined_date, total_points, current_month_points, 
+                        consecutive_months, reward_tier, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ambassador_data['discord_id'],
+                    ambassador_data['username'],
+                    ambassador_data['social_handles'],
+                    ambassador_data.get('platforms', 'all'),
+                    datetime.now().isoformat(),
+                    ambassador_data['total_points'],
+                    ambassador_data['current_month_points'],
+                    ambassador_data['consecutive_months'],
+                    ambassador_data['reward_tier'],
+                    ambassador_data['status']
+                ))
             conn.commit()
             print("✅ Added darktiding to local database")
             
@@ -170,11 +217,11 @@ def verify_ambassador_data():
     try:
         with sqlite3.connect('ambassador_program.db') as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM ambassadors')
+            cursor.execute('SELECT discord_id, username, status FROM ambassadors')
             ambassadors = cursor.fetchall()
             print(f"📊 Local DB: {len(ambassadors)} ambassadors")
             for amb in ambassadors:
-                print(f"  - {amb[1]} (ID: {amb[0]})")
+                print(f"  - {amb[1]} (ID: {amb[0]}, Status: {amb[2]})")
     except Exception as e:
         print(f"❌ Local DB check failed: {e}")
 

@@ -490,7 +490,7 @@ class AmbassadorProgram:
             if milestone == "monthly_goal":
                 embed = discord.Embed(
                     title="🎉 Monthly Goal Achieved!",
-                    description=f"Congratulations {username}! You've hit your 50-point monthly goal!",
+                    description=f"Congratulations {username}! You've hit your 75-point monthly goal!",
                     color=0x00ff00
                 )
                 embed.add_field(
@@ -511,7 +511,7 @@ class AmbassadorProgram:
                 )
                 embed.add_field(
                     name="🎯 You're On Track",
-                    value="Keep posting consistently to reach your 50-point monthly goal!",
+                    value="Keep posting consistently to reach your 75-point monthly goal!",
                     inline=False
                 )
                 embed.add_field(
@@ -543,7 +543,7 @@ class AmbassadorProgram:
                 for discord_id, username, points in ambassadors:
                     try:
                         user = await self.bot.fetch_user(int(discord_id))
-                        progress_percentage = min(100, (points / 50) * 100)
+                        progress_percentage = min(100, (points / 75) * 100)
                         
                         # Create progress bar
                         filled_blocks = int(progress_percentage / 10)
@@ -557,23 +557,23 @@ class AmbassadorProgram:
                         )
                         embed.add_field(
                             name="📊 Current Progress",
-                            value=f"`{progress_bar}` {progress_percentage:.1f}%\n**{points}/50 points**",
+                            value=f"`{progress_bar}` {progress_percentage:.1f}%\n**{points}/75 points**",
                             inline=False
                         )
                         
-                        if points >= 50:
+                        if points >= 75:
                             embed.add_field(
                                 name="🎉 Status",
                                 value="**Goal achieved!** Keep going for bonus points!",
                                 inline=False
                             )
-                        elif points >= 35:
+                        elif points >= 55:
                             embed.add_field(
                                 name="🔥 Status",
                                 value="You're almost there! Just a few more posts to reach your goal!",
                                 inline=False
                             )
-                        elif points >= 20:
+                        elif points >= 30:
                             embed.add_field(
                                 name="💪 Status",
                                 value="Great progress! You're on track to hit your monthly target!",
@@ -611,10 +611,10 @@ class AmbassadorProgram:
                     discord_id, username, _, _, _, total_points, month_points, consecutive, reward_tier, _ = ambassador
                     
                     # Determine compliance
-                    compliance = "✅ Compliant" if month_points >= 50 else "⚠️ Below Minimum"
+                    compliance = "✅ Compliant" if month_points >= 75 else "⚠️ Below Minimum"
                     
                     # Update consecutive months
-                    if month_points >= 50:
+                    if month_points >= 75:
                         consecutive += 1
                     else:
                         consecutive = 0

@@ -11,19 +11,21 @@ if os.path.exists('ambassador_program.db'):
 conn = sqlite3.connect('ambassador_program.db')
 cursor = conn.cursor()
 
-# Create tables
+# Create tables (current schema)
 cursor.execute('''
     CREATE TABLE ambassadors (
-        discord_id TEXT PRIMARY KEY,
-        username TEXT,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discord_id TEXT UNIQUE NOT NULL,
+        username TEXT NOT NULL,
         social_handles TEXT,
-        target_platforms TEXT,
-        joined_date TEXT,
-        total_points INTEGER DEFAULT 0,
+        platforms TEXT,
         current_month_points INTEGER DEFAULT 0,
+        total_points INTEGER DEFAULT 0,
         consecutive_months INTEGER DEFAULT 0,
         reward_tier TEXT DEFAULT 'none',
-        status TEXT DEFAULT 'active'
+        status TEXT DEFAULT 'active',
+        weekly_posts TEXT DEFAULT '0000',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 ''')
 

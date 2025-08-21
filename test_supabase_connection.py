@@ -40,7 +40,7 @@ def test_supabase_connection():
             print(f"📊 Ambassadors table found with {len(result.data)} records")
             
             for ambassador in result.data:
-                print(f"  - {ambassador.get('username', 'Unknown')} (ID: {ambassador.get('discord_id', 'Unknown')})")
+                print(f"  - {ambassador.get('username', 'Unknown')} (ID: {ambassador.get('discord_id', 'Unknown')}, platforms: {ambassador.get('platforms') or ambassador.get('target_platforms') or 'n/a'})")
                 
         except Exception as table_error:
             print(f"⚠️ Ambassadors table issue: {table_error}")
@@ -50,19 +50,20 @@ def test_supabase_connection():
             try:
                 # Note: This would require admin privileges, might fail
                 create_table_sql = """
+                -- Current schema example (for reference; create via Supabase UI or SQL editor)
                 CREATE TABLE IF NOT EXISTS ambassadors (
-                    discord_id TEXT PRIMARY KEY,
-                    username TEXT,
-                    social_handles TEXT,
-                    target_platforms TEXT,
-                    joined_date TIMESTAMP,
-                    total_points INTEGER DEFAULT 0,
-                    current_month_points INTEGER DEFAULT 0,
-                    consecutive_months INTEGER DEFAULT 0,
-                    reward_tier TEXT DEFAULT 'none',
-                    status TEXT DEFAULT 'active',
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
+                    discord_id text PRIMARY KEY,
+                    username text,
+                    social_handles text,
+                    platforms text,
+                    current_month_points integer DEFAULT 0,
+                    total_points integer DEFAULT 0,
+                    consecutive_months integer DEFAULT 0,
+                    reward_tier text DEFAULT 'none',
+                    status text DEFAULT 'active',
+                    weekly_posts text DEFAULT '0000',
+                    created_at timestamptz DEFAULT now(),
+                    updated_at timestamptz DEFAULT now()
                 );
                 """
                 # This might not work with the anon key
@@ -101,8 +102,7 @@ def add_darktiding_to_supabase():
             'discord_id': 'REPLACE_WITH_ACTUAL_DISCORD_ID',  # Replace this
             'username': 'darktiding',
             'social_handles': 'darktiding',
-            'target_platforms': 'instagram,tiktok,youtube',
-            'joined_date': '2025-08-21T10:15:00Z',
+            'platforms': 'instagram,tiktok,youtube',
             'total_points': 0,
             'current_month_points': 0,
             'consecutive_months': 0,

@@ -118,7 +118,7 @@ class GoogleDocsManager:
         
         summary_text = f"""
 Total Active Ambassadors: {monthly_stats.get('total_ambassadors', 0)}
-On Track (50+ points): {monthly_stats.get('compliant_count', 0)}
+On Track (75+ points): {monthly_stats.get('compliant_count', 0)}
 Behind Pace: {monthly_stats.get('behind_count', 0)}
 Average Points This Month: {monthly_stats.get('avg_points', 0):.1f}
 Total Points Awarded: {monthly_stats.get('total_points_awarded', 0)}
@@ -143,7 +143,7 @@ Total Points Awarded: {monthly_stats.get('total_points_awarded', 0)}
         sorted_ambassadors = sorted(ambassadors_data, key=lambda x: x.get('current_month_points', 0), reverse=True)
         
         for i, ambassador in enumerate(sorted_ambassadors[:15], 1):
-            status_emoji = "✅" if ambassador.get('current_month_points', 0) >= 50 else "⚠️"
+            status_emoji = "✅" if ambassador.get('current_month_points', 0) >= 75 else "⚠️"
             tier_info = ambassador.get('reward_tier', 'none').replace('_', ' ').title()
             if tier_info == 'None':
                 tier_info = ""
@@ -171,9 +171,9 @@ Total Points Awarded: {monthly_stats.get('total_points_awarded', 0)}
             month_points = ambassador.get('current_month_points', 0)
             total_points = ambassador.get('total_points', 0)
             consecutive = ambassador.get('consecutive_months', 0)
-            platforms = ambassador.get('target_platforms', 'Not specified')
+            platforms = ambassador.get('platforms', 'Not specified')
             
-            compliance_status = "✅ Compliant" if month_points >= 50 else f"⚠️ Behind ({50 - month_points} pts needed)"
+            compliance_status = "✅ Compliant" if month_points >= 75 else f"⚠️ Behind ({75 - month_points} pts needed)"
             
             ambassador_detail = f"""
 {username}
@@ -299,9 +299,9 @@ class AmbassadorReportingSystem:
             with sqlite3.connect('ambassador_program.db') as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT discord_id, username, social_handles, target_platforms, 
-                           joined_date, total_points, current_month_points, 
-                           consecutive_months, reward_tier, status
+                    SELECT discord_id, username, social_handles, platforms,
+                           current_month_points, total_points,
+                           consecutive_months, reward_tier, status, created_at
                     FROM ambassadors 
                     WHERE status = 'active'
                     ORDER BY current_month_points DESC
@@ -314,13 +314,13 @@ class AmbassadorReportingSystem:
                         'discord_id': row[0],
                         'username': row[1],
                         'social_handles': row[2],
-                        'target_platforms': row[3],
-                        'joined_date': row[4],
+                        'platforms': row[3],
+                        'current_month_points': row[4],
                         'total_points': row[5],
-                        'current_month_points': row[6],
-                        'consecutive_months': row[7],
-                        'reward_tier': row[8],
-                        'status': row[9]
+                        'consecutive_months': row[6],
+                        'reward_tier': row[7],
+                        'status': row[8],
+                        'created_at': row[9]
                     }
                     for row in ambassadors
                 ]
@@ -332,7 +332,7 @@ class AmbassadorReportingSystem:
     async def _calculate_monthly_stats(self, ambassadors_data: List[Dict]) -> Dict:
         """Calculate monthly statistics"""
         total_ambassadors = len(ambassadors_data)
-        compliant_count = sum(1 for a in ambassadors_data if a['current_month_points'] >= 50)
+        compliant_count = sum(1 for a in ambassadors_data if a['current_month_points'] >= 75)
         behind_count = total_ambassadors - compliant_count
         
         total_points = sum(a['current_month_points'] for a in ambassadors_data)
