@@ -417,7 +417,7 @@ class AmbassadorProgram:
             await self.generate_monthly_reports()
     
     async def send_midmonth_reminders(self):
-        """Send reminders to ambassadors behind pace"""
+        """Send encouraging reminders to ambassadors behind pace"""
         try:
             with sqlite3.connect('ambassador_program.db') as conn:
                 cursor = conn.cursor()
@@ -435,28 +435,160 @@ class AmbassadorProgram:
                         needed = 50 - points
                         
                         embed = discord.Embed(
-                            title="📊 Ambassador Program - Mid-Month Check",
-                            description=f"Hi {username}! You currently have **{points} points** this month.",
-                            color=0xffa500
+                            title="🚀 Let's Keep the Momentum Going!",
+                            description=f"Hey {username}! I'm Jim, and I wanted to check in on your ambassador journey.",
+                            color=0x3498db
                         )
                         embed.add_field(
-                            name="🎯 Goal Reminder",
-                            value=f"You need **{needed} more points** to reach the 50-point monthly minimum.",
+                            name="📊 Your Progress",
+                            value=f"You have **{points} points** this month - great start!",
                             inline=False
                         )
                         embed.add_field(
-                            name="💡 Quick Tips",
-                            value="• YouTube/TikTok videos = 15 base points\n• Engage with your posts for bonus points\n• Spread posts throughout the month",
+                            name="🎯 Path to Success",
+                            value=f"Just **{needed} more points** to hit your monthly goal and unlock rewards!",
                             inline=False
                         )
+                        embed.add_field(
+                            name="💡 Easy Ways to Earn Points",
+                            value="""
+                            • 🎥 Share a YouTube/TikTok video about Sidekick Tools (15 pts)
+                            • 📸 Post an Instagram story or reel (8 pts)
+                            • 🐦 Tweet about your experience (6 pts)
+                            • ❓ Answer a question on Reddit/Quora (12 pts)
+                            
+                            **Remember:** I automatically detect platforms and award points!
+                            """,
+                            inline=False
+                        )
+                        embed.add_field(
+                            name="🏆 What You're Working Toward",
+                            value="Consistent ambassadors unlock recurring commissions and exclusive rewards. You've got this!",
+                            inline=False
+                        )
+                        embed.set_footer(text="💬 Just DM me your content - I'll handle the rest!")
                         
                         await user.send(embed=embed)
+                        print(f"📨 Sent encouragement to {username} ({points} points)")
                         
                     except Exception as e:
                         print(f"❌ Failed to send reminder to {username}: {e}")
                         
         except Exception as e:
             print(f"❌ Error sending mid-month reminders: {e}")
+    
+    async def send_progress_celebration(self, discord_id, username, milestone):
+        """Send celebration message when ambassador hits milestones"""
+        try:
+            user = await self.bot.fetch_user(int(discord_id))
+            
+            if milestone == "monthly_goal":
+                embed = discord.Embed(
+                    title="🎉 Monthly Goal Achieved!",
+                    description=f"Congratulations {username}! You've hit your 50-point monthly goal!",
+                    color=0x00ff00
+                )
+                embed.add_field(
+                    name="🏆 Achievement Unlocked",
+                    value="You've maintained your ambassador status for another month!",
+                    inline=False
+                )
+                embed.add_field(
+                    name="🚀 Keep Going",
+                    value="Every additional point counts toward your all-time total and reward tiers!",
+                    inline=False
+                )
+            elif milestone == "first_submission":
+                embed = discord.Embed(
+                    title="🎊 Welcome to Action!",
+                    description=f"Great job {username}! You've made your first submission as a Sidekick Tools ambassador!",
+                    color=0x00ff00
+                )
+                embed.add_field(
+                    name="🎯 You're On Track",
+                    value="Keep posting consistently to reach your 50-point monthly goal!",
+                    inline=False
+                )
+                embed.add_field(
+                    name="💡 Pro Tip",
+                    value="Mix different types of content across platforms for maximum points!",
+                    inline=False
+                )
+            
+            embed.set_footer(text="🌟 Thanks for spreading the word about Sidekick Tools!")
+            await user.send(embed=embed)
+            print(f"🎉 Sent {milestone} celebration to {username}")
+            
+        except Exception as e:
+            print(f"❌ Failed to send celebration to {username}: {e}")
+    
+    async def send_weekly_progress_update(self):
+        """Send weekly progress updates to all ambassadors"""
+        try:
+            with sqlite3.connect('ambassador_program.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT discord_id, username, current_month_points 
+                    FROM ambassadors 
+                    WHERE status = 'active'
+                ''')
+                
+                ambassadors = cursor.fetchall()
+                
+                for discord_id, username, points in ambassadors:
+                    try:
+                        user = await self.bot.fetch_user(int(discord_id))
+                        progress_percentage = min(100, (points / 50) * 100)
+                        
+                        # Create progress bar
+                        filled_blocks = int(progress_percentage / 10)
+                        empty_blocks = 10 - filled_blocks
+                        progress_bar = "█" * filled_blocks + "░" * empty_blocks
+                        
+                        embed = discord.Embed(
+                            title="📈 Weekly Progress Update",
+                            description=f"Hi {username}! Here's how you're doing this month:",
+                            color=0x3498db
+                        )
+                        embed.add_field(
+                            name="📊 Current Progress",
+                            value=f"`{progress_bar}` {progress_percentage:.1f}%\n**{points}/50 points**",
+                            inline=False
+                        )
+                        
+                        if points >= 50:
+                            embed.add_field(
+                                name="🎉 Status",
+                                value="**Goal achieved!** Keep going for bonus points!",
+                                inline=False
+                            )
+                        elif points >= 35:
+                            embed.add_field(
+                                name="🔥 Status",
+                                value="You're almost there! Just a few more posts to reach your goal!",
+                                inline=False
+                            )
+                        elif points >= 20:
+                            embed.add_field(
+                                name="💪 Status",
+                                value="Great progress! You're on track to hit your monthly target!",
+                                inline=False
+                            )
+                        else:
+                            embed.add_field(
+                                name="🚀 Status",
+                                value="Let's ramp up! Share some content about Sidekick Tools this week!",
+                                inline=False
+                            )
+                        
+                        embed.set_footer(text="💡 Remember: I automatically detect platforms and award points!")
+                        await user.send(embed=embed)
+                        
+                    except Exception as e:
+                        print(f"❌ Failed to send weekly update to {username}: {e}")
+                        
+        except Exception as e:
+            print(f"❌ Error sending weekly updates: {e}")
     
     async def generate_monthly_reports(self):
         """Generate end-of-month reports and reset monthly points"""

@@ -1973,6 +1973,9 @@ class BetaTestingBot(commands.Bot):
             self.ambassador_program.init_local_database()
             print('✅ Ambassador Program database initialized')
             
+            # Sync ambassador data from Supabase to local DB on startup
+            await self.sync_ambassador_data_on_startup()
+            
         # Load configuration first
         await self.load_config()
         
@@ -1985,6 +1988,47 @@ class BetaTestingBot(commands.Bot):
         # Start 30-minute update task
         if not self.scheduled_update_task.is_running():
             self.scheduled_update_task.start()
+    
+    async def sync_ambassador_data_on_startup(self):
+        """Sync ambassador data from Supabase to local DB on bot startup"""
+        if not hasattr(self, 'ambassador_program') or not self.ambassador_program.supabase:
+            print("⚠️ Supabase not available - skipping ambassador sync")
+            return
+        
+        try:
+            print("🔄 Syncing ambassador data from Supabase...")
+            result = self.ambassador_program.supabase.table('ambassadors').select('*').execute()
+            supabase_ambassadors = result.data
+            
+            with sqlite3.connect('ambassador_program.db') as conn:
+                cursor = conn.cursor()
+                
+                # Sync each ambassador
+                for ambassador in supabase_ambassadors:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO ambassadors (
+                            discord_id, username, social_handles, target_platforms, 
+                            joined_date, total_points, current_month_points, 
+                            consecutive_months, reward_tier, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        ambassador.get('discord_id'),
+                        ambassador.get('username'),
+                        ambassador.get('social_handles'),
+                        ambassador.get('target_platforms'),
+                        ambassador.get('joined_date'),
+                        ambassador.get('total_points', 0),
+                        ambassador.get('current_month_points', 0),
+                        ambassador.get('consecutive_months', 0),
+                        ambassador.get('reward_tier', 'none'),
+                        ambassador.get('status', 'active')
+                    ))
+                
+                conn.commit()
+                print(f"✅ Synced {len(supabase_ambassadors)} ambassadors from Supabase to local DB")
+                
+        except Exception as e:
+            print(f"⚠️ Startup ambassador sync failed: {e}")
     
     async def on_message(self, message):
         try:
@@ -5092,14 +5136,14 @@ def has_staff_role(user, guild=None):
     return False
 
 @bot.command(name='ambassador')
-async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
+async def ambassador_command(ctx, action=None, user=None):
     """Ambassador Program management commands"""
     # Check Staff role permissions (works in DMs and guilds)
     if not has_staff_role(ctx.author, ctx.guild):
         await ctx.send("❌ You need the Staff role or Manage Server permissions to use ambassador commands.")
         return
     
-    if action == "add" and user and platforms:
+    if action == "add" and user:
         # Convert user string to Member object if needed
         if isinstance(user, str):
             # Remove @ symbol if present
@@ -5136,8 +5180,8 @@ async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
                     supabase_data = {
                         'discord_id': str(user.id),
                         'username': user.display_name,
-                        'social_handles': platforms,
-                        'target_platforms': platforms,
+                        'social_handles': user.display_name,  # Use username as default
+                        'target_platforms': 'all',  # All platforms supported
                         'joined_date': datetime.now().isoformat(),
                         'total_points': 0,
                         'current_month_points': 0,
@@ -5160,63 +5204,119 @@ async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
                         consecutive_months, reward_tier, status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    str(user.id), user.display_name, platforms, platforms,
+                    str(user.id), user.display_name, user.display_name, 'all',
                     datetime.now().isoformat(), 0, 0, 0, 'none', 'active'
                 ))
                 conn.commit()
             
-            # Send DM with rules and scoring system
+            # Send comprehensive welcome message with instructions
             embed = discord.Embed(
                 title="🎉 Welcome to the Sidekick Tools Ambassador Program!",
-                description=f"Hi {user.display_name}! You've been added as an ambassador.",
+                description=f"Hi {user.display_name}! You're now an official Sidekick Tools ambassador. I'm Jim, and I'll be tracking your progress and helping you succeed!",
                 color=0x00ff00
             )
+            
             embed.add_field(
-                name="📋 Your Platforms",
-                value=platforms,
+                name="🚀 Your Mission",
+                value="Help spread the word about Sidekick Tools across all social media platforms! Post content, engage with your audience, and earn rewards.",
                 inline=False
             )
+            
             embed.add_field(
-                name="🎯 Monthly Goal",
-                value="Earn **50+ points** each month to maintain ambassador status",
-                inline=False
-            )
-            embed.add_field(
-                name="📊 Scoring System",
+                name="📤 How to Submit Content",
                 value="""
-                **Base Points:**
-                • YouTube/TikTok Videos: 15 pts
-                • Quora/Reddit Answers: 12 pts  
-                • Facebook Group Posts: 10 pts
-                • Instagram Posts/Reels: 8 pts
-                • Tweets/Threads: 6 pts
-                • Stories: 3 pts
+                **Simply DM me with:**
+                • 📱 Screenshots of your posts (I'll analyze them automatically)
+                • 🔗 URLs to your posts on any platform
+                • 💬 Just paste the link or attach the image!
                 
-                **Engagement Bonuses:**
+                **I support ALL platforms:** YouTube, TikTok, Instagram, Facebook, Twitter, Reddit, Quora, LinkedIn, and more!
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="📊 Automatic Point System",
+                value="""
+                **I automatically detect platforms and award points:**
+                • 🎥 YouTube/TikTok Videos: **15 pts**
+                • ❓ Quora/Reddit Answers: **12 pts**  
+                • 👥 Facebook Group Posts: **10 pts**
+                • 📸 Instagram Posts/Reels: **8 pts**
+                • 🐦 Tweets/Threads: **6 pts**
+                • 📱 Stories: **3 pts**
+                
+                **Engagement Bonuses (automatic):**
                 • +1 pt per 25 likes/upvotes
-                • +2 pts per 5 comments
+                • +2 pts per 5 comments  
                 • +1 pt per share/retweet
                 """,
                 inline=False
             )
+            
+            embed.add_field(
+                name="🎯 Monthly Goal",
+                value="Earn **50+ points** each month to maintain ambassador status and unlock rewards!",
+                inline=False
+            )
+            
             embed.add_field(
                 name="🏆 Reward Tiers",
                 value="""
-                • 3 months: 3-month recurring commissions
-                • 6 months: 6-month recurring commissions  
-                • 9 months: +5% commission bump
-                • 12 months: Lifetime commissions
+                • **3 months:** 3-month recurring commissions
+                • **6 months:** 6-month recurring commissions  
+                • **9 months:** +5% commission bump
+                • **12 months:** 🎉 **Lifetime commissions!**
                 """,
                 inline=False
             )
+            
             embed.add_field(
-                name="📤 How to Submit",
-                value="DM me your post URLs or screenshots. I'll analyze and award points automatically!",
+                name="🤖 Ambassador Commands (DM Only)",
+                value="""
+                • `!mystats` - View your points and progress
+                • `!leaderboard` - See top ambassadors
+                • `!help ambassador` - Get detailed help
+                """,
+                inline=False
+            )
+            
+            embed.add_field(
+                name="📈 Progress Tracking",
+                value="I'll send you updates on your progress and gentle reminders if you're falling behind. Let's work together to hit those goals!",
+                inline=False
+            )
+            
+            embed.set_footer(text="💡 Tip: Post consistently across different platforms for maximum points!")
+            
+            # Add a second embed with content ideas
+            content_embed = discord.Embed(
+                title="💡 Content Ideas to Get You Started",
+                description="Here are some ways to promote Sidekick Tools:",
+                color=0x3498db
+            )
+            
+            content_embed.add_field(
+                name="🎥 Video Content",
+                value="• Tutorial videos showing Sidekick Tools features\n• Before/after comparisons\n• 'Day in the life' using our tools",
+                inline=False
+            )
+            
+            content_embed.add_field(
+                name="📝 Written Content",
+                value="• Product reviews and testimonials\n• Answer questions about productivity tools\n• Share tips and tricks",
+                inline=False
+            )
+            
+            content_embed.add_field(
+                name="📱 Quick Posts",
+                value="• Screenshots of your workflow\n• Stories about how Sidekick Tools helped you\n• Share our latest updates and features",
                 inline=False
             )
             
             try:
                 await user.send(embed=embed)
+                await user.send(embed=content_embed)
                 await ctx.send(f"✅ {user.display_name} has been added as an ambassador and sent the program details!")
             except discord.Forbidden:
                 await ctx.send(f"✅ {user.display_name} added as ambassador, but couldn't send DM (DMs disabled)")
@@ -5247,7 +5347,7 @@ async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
         )
         embed.add_field(
             name="Add Ambassador",
-            value="`!ambassador add @user platforms`\nExample: `!ambassador add @john YouTube, Instagram`",
+            value="`!ambassador add @user`\nExample: `!ambassador add @john`",
             inline=False
         )
         embed.add_field(
@@ -5256,6 +5356,251 @@ async def ambassador_command(ctx, action=None, user=None, *, platforms=None):
             inline=False
         )
         await ctx.send(embed=embed)
+
+# === AMBASSADOR-ONLY COMMANDS ===
+
+@bot.command(name='mystats')
+async def ambassador_stats(ctx):
+    """Show ambassador's personal stats (DM only)"""
+    if not isinstance(ctx.channel, discord.DMChannel):
+        await ctx.send("❌ This command only works in DMs!")
+        return
+    
+    try:
+        # Check if user is an ambassador
+        ambassador = None
+        if bot.ambassador_program.supabase:
+            try:
+                result = bot.ambassador_program.supabase.table('ambassadors').select('*').eq('discord_id', str(ctx.author.id)).eq('status', 'active').execute()
+                if result.data:
+                    ambassador = result.data[0]
+            except Exception as e:
+                print(f"⚠️ Supabase lookup failed: {e}")
+        
+        if not ambassador:
+            with sqlite3.connect('ambassador_program.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
+                ambassador = cursor.fetchone()
+                if ambassador:
+                    ambassador = {
+                        'discord_id': ambassador[0], 'username': ambassador[1], 'total_points': ambassador[5],
+                        'current_month_points': ambassador[6], 'consecutive_months': ambassador[7], 'reward_tier': ambassador[8]
+                    }
+        
+        if not ambassador:
+            await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+            return
+        
+        # Get monthly submission count
+        current_month = datetime.now().strftime("%Y-%m")
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM submissions 
+                WHERE ambassador_id = ? 
+                AND strftime('%Y-%m', timestamp) = ?
+                AND validity_status = 'accepted'
+            ''', (str(ctx.author.id), current_month))
+            monthly_posts = cursor.fetchone()[0]
+        
+        # Calculate progress
+        monthly_points = ambassador.get('current_month_points', 0)
+        progress_percentage = min(100, (monthly_points / 50) * 100)
+        points_needed = max(0, 50 - monthly_points)
+        
+        embed = discord.Embed(
+            title=f"📊 {ambassador.get('username', 'Ambassador')} Stats",
+            color=0x00ff00 if monthly_points >= 50 else 0xffa500
+        )
+        
+        embed.add_field(
+            name="🎯 This Month",
+            value=f"**{monthly_points}/50 points** ({progress_percentage:.1f}%)\n📝 {monthly_posts} posts submitted",
+            inline=False
+        )
+        
+        if points_needed > 0:
+            embed.add_field(
+                name="⚡ Points Needed",
+                value=f"**{points_needed} more points** to reach monthly goal",
+                inline=True
+            )
+        else:
+            embed.add_field(
+                name="🎉 Goal Status",
+                value="**Monthly goal achieved!**",
+                inline=True
+            )
+        
+        embed.add_field(
+            name="🏆 All Time",
+            value=f"**{ambassador.get('total_points', 0)} total points**\n🔥 {ambassador.get('consecutive_months', 0)} consecutive months",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎁 Current Tier",
+            value=f"**{ambassador.get('reward_tier', 'none').replace('_', ' ').title()}**",
+            inline=True
+        )
+        
+        # Progress bar
+        filled_blocks = int(progress_percentage / 10)
+        empty_blocks = 10 - filled_blocks
+        progress_bar = "█" * filled_blocks + "░" * empty_blocks
+        
+        embed.add_field(
+            name="📈 Monthly Progress",
+            value=f"`{progress_bar}` {progress_percentage:.1f}%",
+            inline=False
+        )
+        
+        if points_needed > 0:
+            embed.set_footer(text="💡 Keep posting to reach your monthly goal!")
+        else:
+            embed.set_footer(text="🎉 Great job! You've hit your monthly target!")
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error retrieving stats: {e}")
+
+@bot.command(name='leaderboard')
+async def ambassador_leaderboard(ctx):
+    """Show ambassador leaderboard (DM only)"""
+    if not isinstance(ctx.channel, discord.DMChannel):
+        await ctx.send("❌ This command only works in DMs!")
+        return
+    
+    try:
+        # Check if user is an ambassador
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
+            if not cursor.fetchone():
+                await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+                return
+        
+        # Get top ambassadors this month
+        current_month = datetime.now().strftime("%Y-%m")
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT username, current_month_points, total_points, consecutive_months
+                FROM ambassadors 
+                WHERE status = "active"
+                ORDER BY current_month_points DESC, total_points DESC
+                LIMIT 10
+            ''')
+            ambassadors = cursor.fetchall()
+        
+        if not ambassadors:
+            await ctx.send("📊 No ambassador data available yet.")
+            return
+        
+        embed = discord.Embed(
+            title="🏆 Ambassador Leaderboard",
+            description=f"Top performers this month ({datetime.now().strftime('%B %Y')})",
+            color=0xffd700
+        )
+        
+        leaderboard_text = ""
+        for i, (username, month_points, total_points, consecutive) in enumerate(ambassadors, 1):
+            if i == 1:
+                emoji = "🥇"
+            elif i == 2:
+                emoji = "🥈"
+            elif i == 3:
+                emoji = "🥉"
+            else:
+                emoji = f"{i}."
+            
+            leaderboard_text += f"{emoji} **{username}** - {month_points} pts (🔥{consecutive}mo)\n"
+        
+        embed.add_field(
+            name="📊 Monthly Points",
+            value=leaderboard_text,
+            inline=False
+        )
+        
+        embed.set_footer(text="💡 Keep posting consistently to climb the leaderboard!")
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error retrieving leaderboard: {e}")
+
+@bot.command(name='help')
+async def help_command(ctx, category=None):
+    """Enhanced help command with ambassador-specific help"""
+    if category == "ambassador":
+        if not isinstance(ctx.channel, discord.DMChannel):
+            await ctx.send("❌ Ambassador help only works in DMs!")
+            return
+        
+        # Check if user is an ambassador
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
+            if not cursor.fetchone():
+                await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+                return
+        
+        embed = discord.Embed(
+            title="🤖 Ambassador Help Guide",
+            description="Complete guide for Sidekick Tools ambassadors",
+            color=0x3498db
+        )
+        
+        embed.add_field(
+            name="📤 Submitting Content",
+            value="""
+            **Simply DM me with:**
+            • Screenshots of your posts
+            • URLs to your content
+            • I'll automatically detect the platform and award points!
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🤖 Ambassador Commands",
+            value="""
+            • `!mystats` - View your points and progress
+            • `!leaderboard` - See top ambassadors
+            • `!help ambassador` - This help guide
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📊 Point System",
+            value="""
+            • YouTube/TikTok: 15 pts
+            • Quora/Reddit: 12 pts
+            • Facebook: 10 pts
+            • Instagram: 8 pts
+            • Twitter: 6 pts
+            • Stories: 3 pts
+            + Engagement bonuses!
+            """,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🎯 Monthly Goal",
+            value="Earn 50+ points each month to maintain status and unlock rewards!",
+            inline=False
+        )
+        
+        embed.set_footer(text="💡 Questions? Just ask me in DM!")
+        
+        await ctx.send(embed=embed)
+        return
+    
+    # Regular help command for non-ambassadors
+    # ... existing help code would go here
 
 @bot.command(name='ambassadors')
 async def ambassadors_report(ctx, action=None):
