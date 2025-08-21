@@ -197,10 +197,12 @@ class AmbassadorProgram:
             
             # Prepare the prompt for Gemini
             prompt = f"""
-            Analyze this social media post screenshot and extract the following information in JSON format:
+            Analyze this social media post screenshot and extract the following information in JSON format.
+            IMPORTANT: Only detect these valid platforms that earn points: youtube, tiktok, instagram, facebook, twitter, reddit, quora, linkedin.
+            If the screenshot shows Pinterest, Snapchat, Discord, Telegram, WhatsApp, Tumblr, Twitch, Vimeo, or any other platform, return "invalid_platform".
             
             {{
-                "platform": "detected platform (youtube, tiktok, instagram, facebook, twitter, reddit, quora, linkedin)",
+                "platform": "detected platform (youtube, tiktok, instagram, facebook, twitter, reddit, quora, linkedin, or invalid_platform)",
                 "post_type": "type of content (video, post, story, answer, thread)",
                 "author_handle": "username/handle visible in the screenshot",
                 "engagement_metrics": {{
@@ -267,13 +269,13 @@ class AmbassadorProgram:
         # Base points
         base = self.base_points.get(post_type, 3)
         
-        # Engagement multipliers
+        # Engagement multipliers (handle None values)
         engagement_bonus = 0
-        engagement_bonus += engagement.likes // 25  # +1 per 25 likes
-        engagement_bonus += (engagement.comments // 5) * 2  # +2 per 5 comments
-        engagement_bonus += engagement.shares  # +1 per share
-        engagement_bonus += engagement.retweets  # +1 per retweet
-        engagement_bonus += engagement.saves  # +1 per save
+        engagement_bonus += (engagement.likes or 0) // 25  # +1 per 25 likes
+        engagement_bonus += ((engagement.comments or 0) // 5) * 2  # +2 per 5 comments
+        engagement_bonus += (engagement.shares or 0)  # +1 per share
+        engagement_bonus += (engagement.retweets or 0)  # +1 per retweet
+        engagement_bonus += (engagement.saves or 0)  # +1 per save
         
         return base + engagement_bonus
     
@@ -354,15 +356,13 @@ class AmbassadorProgram:
                 try:
                     supabase_data = {
                         'ambassador_id': submission.ambassador_id,
-                        'platform': submission.platform,
-                        'post_type': submission.post_type,
+                        'platform': submission.platform.value if hasattr(submission.platform, 'value') else str(submission.platform),
+                        'post_type': submission.post_type.value if hasattr(submission.post_type, 'value') else str(submission.post_type),
                         'url': submission.url,
                         'screenshot_hash': submission.screenshot_hash,
                         'points_awarded': submission.points_awarded,
                         'timestamp': submission.timestamp.isoformat(),
-                        'validity_status': submission.validity_status,
-                        'fraud_score': submission.fraud_score,
-                        'engagement_bonus': submission.engagement_bonus
+                        'validity_status': submission.validity_status
                     }
                     
                     result = self.supabase.table('submissions').insert(supabase_data).execute()
@@ -370,8 +370,6 @@ class AmbassadorProgram:
                 except Exception as supabase_error:
                     print(f"⚠️ Supabase storage failed, using local database only: {supabase_error}")
                     # Continue with local database only
-            
-            return True
             
             # Update ambassador points
             await self.update_ambassador_points(submission.ambassador_id, submission.points_awarded)
@@ -777,7 +775,7 @@ class AmbassadorProgram:
                 return Platform.INSTAGRAM, PostType.INSTAGRAM_REEL
             else:
                 return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
-        elif 'facebook.com' in url_lower:
+        elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
             return Platform.FACEBOOK, PostType.FB_GROUP_POST
         elif 'twitter.com' in url_lower or 'x.com' in url_lower:
             return Platform.TWITTER, PostType.TWEET
@@ -785,5 +783,30 @@ class AmbassadorProgram:
             return Platform.REDDIT, PostType.REDDIT_ANSWER
         elif 'quora.com' in url_lower:
             return Platform.QUORA, PostType.QUORA_ANSWER
-        else:
+        elif 'linkedin.com' in url_lower:
+            return Platform.LINKEDIN, PostType.INSTAGRAM_POST
+        elif 'pinterest.com' in url_lower or 'pin.it' in url_lower:
             return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'snapchat.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'discord.com' in url_lower or 'discord.gg' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'telegram.org' in url_lower or 't.me' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'whatsapp.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'tumblr.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'twitch.tv' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'vimeo.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'medium.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'substack.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        elif 'github.com' in url_lower or 'gitlab.com' in url_lower:
+            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+        else:
+            # Unknown platform - accept but will be flagged for review
+            return None, None

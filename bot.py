@@ -1901,6 +1901,9 @@ class MentorshipServices:
 
 class BetaTestingBot(commands.Bot):
     def __init__(self):
+        # Error message rate limiting
+        self.error_message_cooldown = {}
+        self.error_cooldown_duration = 300  # 5 minutes
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
@@ -1985,9 +1988,10 @@ class BetaTestingBot(commands.Bot):
         # Scan recent history silently (no announcements)
         await self.scan_recent_history_silent()
         
-        # Start 30-minute update task
-        if not self.scheduled_update_task.is_running():
-            self.scheduled_update_task.start()
+        # Schedule the recurring tasks
+        self.schedule_update_task.start()
+        self.ambassador_chat_sync_task.start()
+        self.staff_notification_task.start()
     
     async def sync_ambassador_data_on_startup(self):
         """Sync ambassador data from Supabase to local DB on bot startup"""
@@ -2380,7 +2384,14 @@ class BetaTestingBot(commands.Bot):
     
     @tasks.loop(minutes=30)  # Check every 30 minutes
     async def scheduled_update_task(self):
-        """Send proactive updates 3 times per day: 9am, 5pm, 10pm EST"""
+        """Send proactive updates 3 times per day: 9am, 5pm, 10pm EST and sync sheets"""
+        
+        # Periodic Google Sheets sync for bug tracking
+        if hasattr(self, 'sheets_manager') and self.sheets_manager:
+            try:
+                await self.sync_bugs_to_sheets()
+            except Exception as e:
+                print(f"❌ Error in periodic sheets sync: {e}")
         
         # Get current time in EST
         import pytz
@@ -2402,6 +2413,59 @@ class BetaTestingBot(commands.Bot):
                     await self.send_scheduled_update(current_hour)
                 except Exception as e:
                     print(f"Error in scheduled update: {e}")
+    
+    async def sync_bugs_to_sheets(self):
+        """Sync all bugs from database to Google Sheets"""
+        try:
+            if not self.sheets_manager:
+                return
+            
+            print("🔄 Starting periodic bug sync to Google Sheets...")
+            
+            with sqlite3.connect('beta_testing.db') as conn:
+                cursor = conn.cursor()
+                
+                # Get all bugs that need syncing
+                cursor.execute('''
+                    SELECT id, user_id, username, bug_description, timestamp, 
+                           status, channel_id, added_by
+                    FROM bugs 
+                    ORDER BY timestamp DESC
+                ''')
+                
+                all_bugs = cursor.fetchall()
+                
+                synced_count = 0
+                for bug_data in all_bugs:
+                    bug_id, user_id, username, description, timestamp, status, channel_id, added_by = bug_data
+                    
+                    try:
+                        # Prepare bug data for sheets
+                        sheets_bug_data = {
+                            'bug_id': bug_id,
+                            'username': username,
+                            'description': description,
+                            'area': 'General',  # Default area
+                            'timestamp': timestamp,
+                            'status': status,
+                            'channel_id': channel_id,
+                            'guild_id': '',  # Will be filled by sheets manager
+                            'added_by': added_by
+                        }
+                        
+                        # Try to sync to sheets (will update if exists, add if new)
+                        result = await self.sheets_manager.add_bug_to_sheet(sheets_bug_data)
+                        if result:
+                            synced_count += 1
+                            
+                    except Exception as e:
+                        print(f"⚠️ Failed to sync bug #{bug_id}: {e}")
+                        continue
+                
+                print(f"✅ Synced {synced_count} bugs to Google Sheets")
+                
+        except Exception as e:
+            print(f"❌ Error in sync_bugs_to_sheets: {e}")
     
     async def send_scheduled_update(self, hour):
         """Send automated update to beta channels with Google Sheets integration status"""
@@ -2526,6 +2590,226 @@ class BetaTestingBot(commands.Bot):
                         print(f"Error sending {period_name.lower()} update to {channel_id}: {e}")
         else:
             print(f"⏰ {period_name} check: No significant activity, skipping update (Sheets: {sheets_status})")
+    
+    @tasks.loop(hours=6)  # Check every 6 hours
+    async def ambassador_chat_sync_task(self):
+        """Scan ambassador chat history and sync database"""
+        try:
+            if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
+                return
+            
+            print("🔄 Starting ambassador chat history sync...")
+            
+            # Find ambassador channels
+            ambassador_channels = []
+            for guild in self.guilds:
+                for channel in guild.text_channels:
+                    if any(keyword in channel.name.lower() for keyword in ['ambassador', 'content-creator', 'influencer']):
+                        ambassador_channels.append(channel)
+            
+            if not ambassador_channels:
+                print("⚠️ No ambassador channels found")
+                return
+            
+            # Scan recent messages in ambassador channels
+            scanned_messages = 0
+            processed_submissions = 0
+            
+            for channel in ambassador_channels:
+                try:
+                    # Scan last 6 hours of messages
+                    after_time = datetime.now() - timedelta(hours=6)
+                    
+                    async for message in channel.history(limit=200, after=after_time):
+                        scanned_messages += 1
+                        
+                        # Skip bot messages
+                        if message.author.bot:
+                            continue
+                        
+                        # Check if message contains URLs or attachments
+                        has_url = any(word.startswith(('http://', 'https://')) for word in message.content.split())
+                        has_attachment = len(message.attachments) > 0
+                        
+                        if has_url or has_attachment:
+                            # Check if this is an ambassador
+                            ambassador_id = await self.ambassador_program.get_ambassador_by_discord_id(message.author.id)
+                            
+                            if ambassador_id:
+                                # Process as potential submission
+                                if has_url:
+                                    urls = [word for word in message.content.split() if word.startswith(('http://', 'https://'))]
+                                    for url in urls:
+                                        # Check if already processed
+                                        content_hash = self.ambassador_program.generate_content_hash(message.content, url)
+                                        is_duplicate = await self.ambassador_program.check_duplicate_submission(content_hash, ambassador_id)
+                                        
+                                        if not is_duplicate:
+                                            await process_url_submission(message, ambassador_id, url)
+                                            processed_submissions += 1
+                                
+                                if has_attachment:
+                                    for attachment in message.attachments:
+                                        if attachment.content_type and attachment.content_type.startswith('image/'):
+                                            # Check if already processed
+                                            content_hash = self.ambassador_program.generate_content_hash(message.content, attachment.url)
+                                            is_duplicate = await self.ambassador_program.check_duplicate_submission(content_hash, ambassador_id)
+                                            
+                                            if not is_duplicate:
+                                                await process_screenshot_submission(message, ambassador_id, attachment.url)
+                                                processed_submissions += 1
+                
+                except Exception as e:
+                    print(f"❌ Error scanning channel {channel.name}: {e}")
+                    continue
+            
+            print(f"✅ Ambassador sync complete: {scanned_messages} messages scanned, {processed_submissions} new submissions processed")
+            
+        except Exception as e:
+            print(f"❌ Error in ambassador chat sync: {e}")
+    
+    @tasks.loop(hours=12)  # Check twice daily
+    async def staff_notification_task(self):
+        """Send periodic staff notifications with ambassador updates and command instructions"""
+        try:
+            if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
+                return
+            
+            # Get current time in EST
+            import pytz
+            est = pytz.timezone('US/Eastern')
+            current_time = datetime.now(est)
+            current_hour = current_time.hour
+            
+            # Send notifications at 9am and 9pm EST
+            if current_hour not in [9, 21]:
+                return
+            
+            # Check if we already sent a notification this hour
+            if hasattr(self, '_last_staff_notification_hour') and self._last_staff_notification_hour == current_hour:
+                return
+            
+            self._last_staff_notification_hour = current_hour
+            
+            print("📊 Generating staff notification...")
+            
+            # Get ambassador statistics
+            stats = await self.get_ambassador_statistics()
+            
+            # Create staff notification embed
+            embed = discord.Embed(
+                title="📊 Ambassador Program Update",
+                description="Daily ambassador program status and statistics",
+                color=0x00ff00 if current_hour == 9 else 0x0066cc,
+                timestamp=datetime.now()
+            )
+            
+            # Add statistics
+            embed.add_field(name="👥 Active Ambassadors", value=str(stats['active_ambassadors']), inline=True)
+            embed.add_field(name="📝 Submissions Today", value=str(stats['submissions_today']), inline=True)
+            embed.add_field(name="⚠️ Flagged for Review", value=str(stats['flagged_submissions']), inline=True)
+            
+            # Add leaderboard
+            if stats['top_ambassadors']:
+                leaderboard = "\n".join([f"{i+1}. {amb['username']}: {amb['points']} pts" 
+                                       for i, amb in enumerate(stats['top_ambassadors'][:5])])
+                embed.add_field(name="🏆 Top Ambassadors (This Month)", value=leaderboard, inline=False)
+            
+            # Add command instructions
+            commands_text = """
+            **Staff Commands:**
+            • `!ambassador-stats` - View detailed statistics
+            • `!ambassador-review` - Review flagged submissions
+            • `!ambassador-approve <submission_id>` - Approve flagged submission
+            • `!ambassador-reject <submission_id>` - Reject flagged submission
+            • `!ambassador-leaderboard` - View full leaderboard
+            • `!ambassador-recover` - Recover lost data from chat history
+            """
+            embed.add_field(name="🛠️ Available Commands", value=commands_text, inline=False)
+            
+            # Add footer
+            time_period = "Morning" if current_hour == 9 else "Evening"
+            embed.set_footer(text=f"{time_period} Ambassador Report • Jim the Mentor")
+            
+            # Send to staff channels (look for admin/staff channels)
+            staff_channels = []
+            for guild in self.guilds:
+                for channel in guild.text_channels:
+                    if any(keyword in channel.name.lower() for keyword in ['staff', 'admin', 'mod', 'management']):
+                        staff_channels.append(channel)
+            
+            if not staff_channels:
+                # Fallback to beta channels if no staff channels found
+                staff_channels = []
+                for guild in self.guilds:
+                    for channel_id in self.beta_channels:
+                        channel = guild.get_channel(int(channel_id))
+                        if channel:
+                            staff_channels.append(channel)
+            
+            # Send notification
+            for channel in staff_channels:
+                try:
+                    await channel.send(embed=embed)
+                except Exception as e:
+                    print(f"❌ Error sending staff notification to {channel.name}: {e}")
+            
+            print(f"✅ Staff notification sent to {len(staff_channels)} channels")
+            
+        except Exception as e:
+            print(f"❌ Error in staff notification task: {e}")
+    
+    async def get_ambassador_statistics(self):
+        """Get comprehensive ambassador program statistics"""
+        try:
+            with sqlite3.connect('ambassador_program.db') as conn:
+                cursor = conn.cursor()
+                
+                # Get active ambassadors count
+                cursor.execute("SELECT COUNT(*) FROM ambassadors WHERE status = 'active'")
+                active_ambassadors = cursor.fetchone()[0]
+                
+                # Get submissions today
+                today = datetime.now().date()
+                cursor.execute("""
+                    SELECT COUNT(*) FROM submissions 
+                    WHERE DATE(timestamp) = ?
+                """, (today,))
+                submissions_today = cursor.fetchone()[0]
+                
+                # Get flagged submissions
+                cursor.execute("""
+                    SELECT COUNT(*) FROM submissions 
+                    WHERE validity_status = 'flagged'
+                """, ())
+                flagged_submissions = cursor.fetchone()[0]
+                
+                # Get top ambassadors this month
+                current_month = datetime.now().replace(day=1).date()
+                cursor.execute("""
+                    SELECT a.username, a.current_month_points as points
+                    FROM ambassadors a
+                    WHERE a.status = 'active'
+                    ORDER BY a.current_month_points DESC
+                    LIMIT 10
+                """)
+                top_ambassadors = [{'username': row[0], 'points': row[1]} for row in cursor.fetchall()]
+                
+                return {
+                    'active_ambassadors': active_ambassadors,
+                    'submissions_today': submissions_today,
+                    'flagged_submissions': flagged_submissions,
+                    'top_ambassadors': top_ambassadors
+                }
+                
+        except Exception as e:
+            print(f"❌ Error getting ambassador statistics: {e}")
+            return {
+                'active_ambassadors': 0,
+                'submissions_today': 0,
+                'flagged_submissions': 0,
+                'top_ambassadors': []
+            }
     
     async def get_recent_activity_context(self, hours_back: int) -> str:
         """Get context of recent activity for AI analysis with message links"""
@@ -5065,6 +5349,287 @@ async def report_bug(ctx, *, bug_description: str = None):
         )
         await ctx.send(embed=error_embed)
 
+# Ambassador staff management commands
+@bot.command(name='ambassador-stats')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_stats(ctx):
+    """View detailed ambassador program statistics (Staff only)"""
+    try:
+        stats = await bot.get_ambassador_statistics()
+        
+        embed = discord.Embed(
+            title="📊 Ambassador Program Statistics",
+            description="Comprehensive ambassador program overview",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(name="👥 Active Ambassadors", value=str(stats['active_ambassadors']), inline=True)
+        embed.add_field(name="📝 Submissions Today", value=str(stats['submissions_today']), inline=True)
+        embed.add_field(name="⚠️ Flagged for Review", value=str(stats['flagged_submissions']), inline=True)
+        
+        # Add detailed leaderboard
+        if stats['top_ambassadors']:
+            leaderboard = "\n".join([f"{i+1}. {amb['username']}: {amb['points']} pts" 
+                                   for i, amb in enumerate(stats['top_ambassadors'])])
+            embed.add_field(name="🏆 Top Ambassadors (This Month)", value=leaderboard, inline=False)
+        
+        embed.set_footer(text="Ambassador Statistics • Jim the Mentor")
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error getting ambassador statistics: {e}")
+
+@bot.command(name='ambassador-review')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_review(ctx):
+    """Review flagged ambassador submissions (Staff only)"""
+    try:
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            
+            # Get flagged submissions
+            cursor.execute("""
+                SELECT s.id, s.ambassador_id, a.username, s.platform, s.post_type, 
+                       s.url, s.content_preview, s.timestamp, s.points_awarded
+                FROM submissions s
+                JOIN ambassadors a ON s.ambassador_id = a.id
+                WHERE s.validity_status = 'flagged'
+                ORDER BY s.timestamp DESC
+                LIMIT 10
+            """)
+            
+            flagged = cursor.fetchall()
+            
+            if not flagged:
+                embed = discord.Embed(
+                    title="✅ No Flagged Submissions",
+                    description="All submissions are currently approved!",
+                    color=0x00ff00
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            embed = discord.Embed(
+                title="⚠️ Flagged Submissions for Review",
+                description=f"Found {len(flagged)} submissions requiring staff review",
+                color=0xffa500
+            )
+            
+            for submission in flagged[:5]:  # Show first 5
+                sub_id, amb_id, username, platform, post_type, url, preview, timestamp, points = submission
+                
+                field_value = f"**Ambassador:** {username}\n"
+                field_value += f"**Platform:** {platform}\n"
+                field_value += f"**Type:** {post_type}\n"
+                if url:
+                    field_value += f"**URL:** {url[:50]}...\n"
+                field_value += f"**Preview:** {preview[:100]}...\n"
+                field_value += f"**Submitted:** {timestamp}\n"
+                field_value += f"**Use:** `!ambassador-approve {sub_id}` or `!ambassador-reject {sub_id}`"
+                
+                embed.add_field(
+                    name=f"Submission #{sub_id}",
+                    value=field_value,
+                    inline=False
+                )
+            
+            if len(flagged) > 5:
+                embed.add_field(
+                    name="📋 More Submissions",
+                    value=f"And {len(flagged) - 5} more flagged submissions...",
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error reviewing flagged submissions: {e}")
+
+@bot.command(name='ambassador-approve')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_approve(ctx, submission_id: int):
+    """Approve a flagged ambassador submission (Staff only)"""
+    try:
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            
+            # Get submission details
+            cursor.execute("""
+                SELECT s.ambassador_id, s.platform, s.post_type, s.engagement, a.username
+                FROM submissions s
+                JOIN ambassadors a ON s.ambassador_id = a.id
+                WHERE s.id = ? AND s.validity_status = 'flagged'
+            """, (submission_id,))
+            
+            result = cursor.fetchone()
+            if not result:
+                await ctx.send(f"❌ Submission #{submission_id} not found or not flagged.")
+                return
+            
+            ambassador_id, platform, post_type, engagement_json, username = result
+            
+            # Calculate points for the submission
+            from ambassador_program import PostType, EngagementMetrics
+            import json
+            
+            engagement_data = json.loads(engagement_json) if engagement_json else {}
+            engagement = EngagementMetrics(
+                likes=engagement_data.get('likes', 0),
+                comments=engagement_data.get('comments', 0),
+                shares=engagement_data.get('shares', 0),
+                views=engagement_data.get('views', 0),
+                saves=engagement_data.get('saves', 0)
+            )
+            
+            points = bot.ambassador_program.calculate_points(PostType(post_type), engagement)
+            
+            # Update submission status and award points
+            cursor.execute("""
+                UPDATE submissions 
+                SET validity_status = 'accepted', points_awarded = ?
+                WHERE id = ?
+            """, (points, submission_id))
+            
+            # Update ambassador points
+            cursor.execute("""
+                UPDATE ambassadors 
+                SET current_month_points = current_month_points + ?,
+                    total_points = total_points + ?
+                WHERE id = ?
+            """, (points, points, ambassador_id))
+            
+            conn.commit()
+            
+            embed = discord.Embed(
+                title="✅ Submission Approved",
+                description=f"Submission #{submission_id} has been approved!",
+                color=0x00ff00
+            )
+            embed.add_field(name="Ambassador", value=username, inline=True)
+            embed.add_field(name="Points Awarded", value=str(points), inline=True)
+            embed.add_field(name="Approved By", value=ctx.author.mention, inline=True)
+            
+            await ctx.send(embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error approving submission: {e}")
+
+@bot.command(name='ambassador-reject')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_reject(ctx, submission_id: int, *, reason: str = "Does not meet quality standards"):
+    """Reject a flagged ambassador submission (Staff only)"""
+    try:
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            
+            # Get submission details
+            cursor.execute("""
+                SELECT a.username
+                FROM submissions s
+                JOIN ambassadors a ON s.ambassador_id = a.id
+                WHERE s.id = ? AND s.validity_status = 'flagged'
+            """, (submission_id,))
+            
+            result = cursor.fetchone()
+            if not result:
+                await ctx.send(f"❌ Submission #{submission_id} not found or not flagged.")
+                return
+            
+            username = result[0]
+            
+            # Update submission status
+            cursor.execute("""
+                UPDATE submissions 
+                SET validity_status = 'rejected', points_awarded = 0
+                WHERE id = ?
+            """, (submission_id,))
+            
+            conn.commit()
+            
+            embed = discord.Embed(
+                title="❌ Submission Rejected",
+                description=f"Submission #{submission_id} has been rejected.",
+                color=0xff0000
+            )
+            embed.add_field(name="Ambassador", value=username, inline=True)
+            embed.add_field(name="Reason", value=reason, inline=True)
+            embed.add_field(name="Rejected By", value=ctx.author.mention, inline=True)
+            
+            await ctx.send(embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error rejecting submission: {e}")
+
+@bot.command(name='ambassador-leaderboard')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_leaderboard(ctx):
+    """View full ambassador leaderboard (Staff only)"""
+    try:
+        with sqlite3.connect('ambassador_program.db') as conn:
+            cursor = conn.cursor()
+            
+            # Get all active ambassadors with their points
+            cursor.execute("""
+                SELECT username, current_month_points, total_points, consecutive_months, reward_tier
+                FROM ambassadors
+                WHERE status = 'active'
+                ORDER BY current_month_points DESC, total_points DESC
+            """)
+            
+            ambassadors = cursor.fetchall()
+            
+            if not ambassadors:
+                await ctx.send("❌ No active ambassadors found.")
+                return
+            
+            embed = discord.Embed(
+                title="🏆 Ambassador Leaderboard",
+                description=f"Rankings for {len(ambassadors)} active ambassadors",
+                color=0xffd700,
+                timestamp=datetime.now()
+            )
+            
+            # Top 10 this month
+            monthly_leaders = "\n".join([
+                f"{i+1}. **{amb[0]}** - {amb[1]} pts this month"
+                for i, amb in enumerate(ambassadors[:10])
+            ])
+            embed.add_field(name="📅 This Month's Leaders", value=monthly_leaders, inline=False)
+            
+            # All-time leaders
+            all_time = sorted(ambassadors, key=lambda x: x[2], reverse=True)[:5]
+            all_time_leaders = "\n".join([
+                f"{i+1}. **{amb[0]}** - {amb[2]} total pts"
+                for i, amb in enumerate(all_time)
+            ])
+            embed.add_field(name="🌟 All-Time Leaders", value=all_time_leaders, inline=False)
+            
+            embed.set_footer(text="Ambassador Leaderboard • Jim the Mentor")
+            await ctx.send(embed=embed)
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error getting leaderboard: {e}")
+
+@bot.command(name='ambassador-recover')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_recover(ctx, hours_back: int = 24):
+    """Recover lost ambassador data from chat history (Staff only)"""
+    try:
+        if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program:
+            await ctx.send("❌ Ambassador program not initialized.")
+            return
+        
+        await ctx.send(f"🔄 Starting ambassador data recovery for the last {hours_back} hours...")
+        
+        # Use the existing recovery method
+        await bot.ambassador_program.recover_submissions_from_chat_history(bot, hours_back)
+        
+        await ctx.send("✅ Ambassador data recovery complete! Check console for details.")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error during recovery: {e}")
+
 @bot.command(name='view-sheet')
 @commands.has_any_role('Staff', 'Admin', 'Moderator')
 async def view_sheet(ctx):
@@ -6020,10 +6585,23 @@ async def handle_ambassador_submission(message, ambassador_data):
             for url in urls:
                 await process_url_submission(message, discord_id, url)
         
-        # Process screenshot submissions  
+        # Process screenshot submissions with carousel detection
         if screenshots:
-            for screenshot in screenshots:
-                await process_screenshot_submission(message, discord_id, screenshot)
+            # Check if multiple screenshots might be from same post (carousel)
+            if len(screenshots) > 1:
+                # For multiple screenshots, analyze first one and treat others as carousel
+                await process_screenshot_submission(message, discord_id, screenshots[0])
+                
+                # Add note about carousel detection
+                carousel_embed = discord.Embed(
+                    title="📸 Carousel Detected",
+                    description=f"I detected {len(screenshots)} images. I've processed the first one as your main post. If these are separate posts, please submit them individually.",
+                    color=0x3498db
+                )
+                await message.reply(embed=carousel_embed)
+            else:
+                # Single screenshot - process normally
+                await process_screenshot_submission(message, discord_id, screenshots[0])
                 
     except Exception as e:
         print(f"❌ Error handling ambassador submission: {e}")
@@ -6048,8 +6626,33 @@ async def process_url_submission(message, ambassador_id, url):
         # For now, use basic engagement (would need API integration for real scraping)
         engagement = EngagementMetrics(likes=0, comments=0, shares=0, views=0)
         
-        # Calculate points
-        points = bot.ambassador_program.calculate_points(post_type, engagement)
+        # Handle unknown platforms - accept but flag for staff review
+        if platform is None or post_type is None:
+            # Unknown platform - accept but flag for staff review
+            platform = Platform.INSTAGRAM  # Use as placeholder
+            post_type = PostType.INSTAGRAM_POST
+            validity_status = "flagged"  # Flag for staff review
+            points = 0  # No points until staff approves
+            
+            # Ask for screenshot to help with verification
+            embed = discord.Embed(
+                title="📋 Submission Received - Verification Needed",
+                description="Your submission has been received but needs staff verification.",
+                color=0xffa500
+            )
+            embed.add_field(
+                name="🔍 Next Steps", 
+                value="Staff will review and award appropriate points if valid.",
+                inline=False
+            )
+            embed.add_field(
+                name="📸 Help Us Verify", 
+                value="Please also send a screenshot of your post to help staff verify the platform and engagement.",
+                inline=False
+            )
+        else:
+            validity_status = "accepted"
+            points = bot.ambassador_program.calculate_points(post_type, engagement)
         
         # Create submission
         submission = AmbassadorSubmission(
@@ -6061,9 +6664,9 @@ async def process_url_submission(message, ambassador_id, url):
             engagement=engagement,
             content_preview=message.content[:100],
             timestamp=datetime.now(),
+            validity_status=validity_status,
             points_awarded=points,
             is_duplicate=False,
-            validity_status="accepted",
             gemini_analysis=None
         )
         
@@ -6086,7 +6689,14 @@ async def process_url_submission(message, ambassador_id, url):
             
     except Exception as e:
         print(f"❌ Error processing URL submission: {e}")
-        await message.reply("❌ Error processing your URL submission.")
+        # Rate limit error messages to prevent spam
+        user_id = str(message.author.id)
+        current_time = datetime.now().timestamp()
+        
+        if user_id not in bot.error_message_cooldown or \
+           current_time - bot.error_message_cooldown[user_id] > bot.error_cooldown_duration:
+            bot.error_message_cooldown[user_id] = current_time
+            await message.reply("❌ Error processing your URL submission. Please try again later.")
 
 async def process_screenshot_submission(message, ambassador_id, screenshot):
     """Process screenshot-based submission"""
@@ -6115,21 +6725,101 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
             return
         
         # Extract data from analysis
-        try:
-            platform = Platform(analysis.get('platform', 'unknown'))
-        except ValueError:
-            platform = Platform.INSTAGRAM  # Default fallback
+        detected_platform = analysis.get('platform', 'unknown')
         
-        try:
-            post_type_str = analysis.get('post_type', 'post')
-            if 'video' in post_type_str.lower():
-                post_type = PostType.INSTAGRAM_REEL
-            elif 'answer' in post_type_str.lower():
-                post_type = PostType.QUORA_ANSWER
-            else:
-                post_type = PostType.INSTAGRAM_POST
-        except:
+        # Handle unknown or non-standard platforms - accept but flag for staff review
+        if detected_platform == 'invalid_platform' or detected_platform == 'unknown':
+            # Unknown platform - accept but flag for staff review
+            platform = Platform.INSTAGRAM  # Use as placeholder
             post_type = PostType.INSTAGRAM_POST
+            validity_status = "flagged"  # Flag for staff review
+            points = 0  # No points until staff approves
+            
+            # Determine platform name for user feedback
+            platform_name = "Unknown platform"
+            if 'pinterest' in str(analysis).lower():
+                platform_name = "Pinterest"
+            elif 'snapchat' in str(analysis).lower():
+                platform_name = "Snapchat"
+            elif 'discord' in str(analysis).lower():
+                platform_name = "Discord"
+            elif 'telegram' in str(analysis).lower():
+                platform_name = "Telegram"
+            elif 'whatsapp' in str(analysis).lower():
+                platform_name = "WhatsApp"
+            elif 'tumblr' in str(analysis).lower():
+                platform_name = "Tumblr"
+            elif 'twitch' in str(analysis).lower():
+                platform_name = "Twitch"
+            elif 'vimeo' in str(analysis).lower():
+                platform_name = "Vimeo"
+            elif 'medium' in str(analysis).lower():
+                platform_name = "Medium"
+            
+            embed = discord.Embed(
+                title="📋 Screenshot Received - Verification Needed",
+                description=f"Your {platform_name} screenshot has been received but needs staff verification.",
+                color=0xffa500
+            )
+            embed.add_field(
+                name="🔍 Next Steps", 
+                value="Staff will review and award appropriate points if valid.",
+                inline=False
+            )
+            embed.add_field(
+                name="ℹ️ Note", 
+                value="All major platforms are supported - this just needs manual verification.",
+                inline=False
+            )
+        
+        else:
+            # Valid platform - continue processing
+            try:
+                platform = Platform(detected_platform)
+                validity_status = "accepted"
+            except ValueError:
+                # If platform string doesn't match enum, accept but flag for review
+                platform = Platform.INSTAGRAM  # Use as placeholder
+                validity_status = "flagged"
+                
+                embed = discord.Embed(
+                    title="📋 Screenshot Received - Verification Needed",
+                    description=f"Your screenshot from '{detected_platform}' has been received but needs staff verification.",
+                    color=0xffa500
+                )
+                embed.add_field(
+                    name="🔍 Next Steps", 
+                    value="Staff will review and award appropriate points if valid.",
+                    inline=False
+                )
+                embed.add_field(
+                    name="ℹ️ Note", 
+                    value="All major platforms are supported - this just needs manual verification.",
+                    inline=False
+                )
+        
+            try:
+                post_type_str = analysis.get('post_type', 'post')
+                if 'video' in post_type_str.lower():
+                    if platform == Platform.YOUTUBE or platform == Platform.TIKTOK:
+                        post_type = PostType.YOUTUBE_VIDEO
+                    else:
+                        post_type = PostType.INSTAGRAM_REEL
+                elif 'answer' in post_type_str.lower():
+                    if platform == Platform.QUORA:
+                        post_type = PostType.QUORA_ANSWER
+                    elif platform == Platform.REDDIT:
+                        post_type = PostType.REDDIT_ANSWER
+                    else:
+                        post_type = PostType.INSTAGRAM_POST
+                elif 'tweet' in post_type_str.lower() or 'thread' in post_type_str.lower():
+                    post_type = PostType.TWEET
+                elif 'story' in post_type_str.lower():
+                    post_type = PostType.STORY
+                else:
+                    post_type = PostType.INSTAGRAM_POST
+            except:
+                post_type = PostType.INSTAGRAM_POST
         
         # Extract engagement metrics
         engagement_data = analysis.get('engagement_metrics', {})
@@ -6141,18 +6831,21 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
             saves=engagement_data.get('saves', 0)
         )
         
-        # Check authenticity
+        # Check authenticity and calculate points
         authenticity = analysis.get('authenticity_check', {})
         is_authentic = authenticity.get('is_likely_authentic', True)
         quality_score = authenticity.get('quality_score', 5)
         
-        validity_status = "accepted"
-        if not is_authentic or quality_score < 3:
-            validity_status = "flagged"
+        # Override validity_status if already set from platform detection
+        if 'validity_status' not in locals():
+            validity_status = "accepted"
+            if not is_authentic or quality_score < 3:
+                validity_status = "flagged"
         
         # Calculate points
-        points = bot.ambassador_program.calculate_points(post_type, engagement)
-        if validity_status == "flagged":
+        if validity_status == "accepted":
+            points = bot.ambassador_program.calculate_points(post_type, engagement)
+        else:
             points = 0  # No points for flagged content
         
         # Create submission
@@ -6199,12 +6892,20 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
             
     except Exception as e:
         print(f"❌ Error processing screenshot submission: {e}")
-        await message.reply("❌ Error processing your screenshot submission.")
+        # Rate limit error messages to prevent spam
+        user_id = str(message.author.id)
+        current_time = datetime.now().timestamp()
+        
+        if user_id not in bot.error_message_cooldown or \
+           current_time - bot.error_message_cooldown[user_id] > bot.error_cooldown_duration:
+            bot.error_message_cooldown[user_id] = current_time
+            await message.reply("❌ Error processing your screenshot submission. Please try again later.")
 
 def detect_platform_from_url(url):
-    """Detect platform and post type from URL"""
+    """Detect platform and post type from URL - only award points for valid platforms"""
     url_lower = url.lower()
     
+    # Valid platforms that earn points
     if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
         return Platform.YOUTUBE, PostType.YOUTUBE_VIDEO
     elif 'tiktok.com' in url_lower:
@@ -6214,7 +6915,7 @@ def detect_platform_from_url(url):
             return Platform.INSTAGRAM, PostType.INSTAGRAM_REEL
         else:
             return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
-    elif 'facebook.com' in url_lower:
+    elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
         return Platform.FACEBOOK, PostType.FB_GROUP_POST
     elif 'twitter.com' in url_lower or 'x.com' in url_lower:
         return Platform.TWITTER, PostType.TWEET
@@ -6222,8 +6923,29 @@ def detect_platform_from_url(url):
         return Platform.REDDIT, PostType.REDDIT_ANSWER
     elif 'quora.com' in url_lower:
         return Platform.QUORA, PostType.QUORA_ANSWER
+    elif 'linkedin.com' in url_lower:
+        return Platform.LINKEDIN, PostType.INSTAGRAM_POST  # Use generic post type
+    
+    # Invalid platforms that don't earn points
+    elif any(invalid in url_lower for invalid in [
+        'pinterest.com', 'pin.it',  # Pinterest
+        'snapchat.com',             # Snapchat
+        'discord.com', 'discord.gg', # Discord
+        'telegram.org', 't.me',     # Telegram
+        'whatsapp.com',             # WhatsApp
+        'tumblr.com',               # Tumblr
+        'twitch.tv',                # Twitch
+        'vimeo.com',                # Vimeo
+        'dailymotion.com',          # Dailymotion
+        'medium.com',               # Medium
+        'substack.com',             # Substack
+        'github.com',               # GitHub
+    ]):
+        return None, None  # Return None for invalid platforms
+    
+    # Unknown platform - don't default to Instagram
     else:
-        return Platform.INSTAGRAM, PostType.INSTAGRAM_POST  # Default fallback
+        return None, None
 
 if __name__ == "__main__":
     # Load environment variables
