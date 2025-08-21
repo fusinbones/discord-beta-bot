@@ -2090,8 +2090,11 @@ class BetaTestingBot(commands.Bot):
                 except Exception as e:
                     print(f"❌ Error checking ambassador status: {e}")
             
-            # Handle Ambassador Program category channels
-            elif message.guild and message.channel.category and "ambassador program" in message.channel.category.name.lower():
+            # Handle Ambassador Program category channels and specific ambassador channels
+            elif message.guild and (
+                (message.channel.category and "ambassador program" in message.channel.category.name.lower()) or
+                message.channel.id == 1407762085214949437  # #sidekick-tools-ambassadors
+            ):
                 try:
                     with sqlite3.connect('ambassador_program.db') as conn:
                         cursor = conn.cursor()
@@ -5276,7 +5279,7 @@ async def ambassador_command(ctx, action=None, user=None):
                 value="""
                 • `!mystats` - View your points and progress
                 • `!leaderboard` - See top ambassadors
-                • `!help ambassador` - Get detailed help
+                • `!ambassadorhelp` - Get detailed help
                 """,
                 inline=False
             )
@@ -5531,76 +5534,71 @@ async def ambassador_leaderboard(ctx):
     except Exception as e:
         await ctx.send(f"❌ Error retrieving leaderboard: {e}")
 
-@bot.command(name='help')
-async def help_command(ctx, category=None):
-    """Enhanced help command with ambassador-specific help"""
-    if category == "ambassador":
-        if not isinstance(ctx.channel, discord.DMChannel):
-            await ctx.send("❌ Ambassador help only works in DMs!")
-            return
-        
-        # Check if user is an ambassador
-        with sqlite3.connect('ambassador_program.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
-            if not cursor.fetchone():
-                await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
-                return
-        
-        embed = discord.Embed(
-            title="🤖 Ambassador Help Guide",
-            description="Complete guide for Sidekick Tools ambassadors",
-            color=0x3498db
-        )
-        
-        embed.add_field(
-            name="📤 Submitting Content",
-            value="""
-            **Simply DM me with:**
-            • Screenshots of your posts
-            • URLs to your content
-            • I'll automatically detect the platform and award points!
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🤖 Ambassador Commands",
-            value="""
-            • `!mystats` - View your points and progress
-            • `!leaderboard` - See top ambassadors
-            • `!help ambassador` - This help guide
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="📊 Point System",
-            value="""
-            • YouTube/TikTok: 15 pts
-            • Quora/Reddit: 12 pts
-            • Facebook: 10 pts
-            • Instagram: 8 pts
-            • Twitter: 6 pts
-            • Stories: 3 pts
-            + Engagement bonuses!
-            """,
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🎯 Monthly Goal",
-            value="Earn 50+ points each month to maintain status and unlock rewards!",
-            inline=False
-        )
-        
-        embed.set_footer(text="💡 Questions? Just ask me in DM!")
-        
-        await ctx.send(embed=embed)
+@bot.command(name='ambassadorhelp')
+async def ambassador_help_command(ctx):
+    """Ambassador-specific help command (DM only)"""
+    if not isinstance(ctx.channel, discord.DMChannel):
+        await ctx.send("❌ Ambassador help only works in DMs!")
         return
     
-    # Regular help command for non-ambassadors
-    # ... existing help code would go here
+    # Check if user is an ambassador
+    with sqlite3.connect('ambassador_program.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
+        if not cursor.fetchone():
+            await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+            return
+    
+    embed = discord.Embed(
+        title="🤖 Ambassador Help Guide",
+        description="Complete guide for Sidekick Tools ambassadors",
+        color=0x3498db
+    )
+    
+    embed.add_field(
+        name="📤 Submitting Content",
+        value="""
+        **Simply DM me with:**
+        • Screenshots of your posts
+        • URLs to your content
+        • I'll automatically detect the platform and award points!
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🤖 Ambassador Commands",
+        value="""
+        • `!mystats` - View your points and progress
+        • `!leaderboard` - See top ambassadors
+        • `!ambassadorhelp` - This help guide
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 Point System",
+        value="""
+        • YouTube/TikTok: 15 pts
+        • Quora/Reddit: 12 pts
+        • Facebook: 10 pts
+        • Instagram: 8 pts
+        • Twitter: 6 pts
+        • Stories: 3 pts
+        + Engagement bonuses!
+        """,
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎯 Monthly Goal",
+        value="Earn 50+ points each month to maintain status and unlock rewards!",
+        inline=False
+    )
+    
+    embed.set_footer(text="💡 Questions? Just ask me in DM!")
+    
+    await ctx.send(embed=embed)
 
 @bot.command(name='ambassadors')
 async def ambassadors_report(ctx, action=None):
