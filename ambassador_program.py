@@ -110,6 +110,9 @@ class AmbassadorProgram:
             PostType.STORY: 3
         }
         
+        # Weekly streak bonus
+        self.weekly_streak_bonus = 10
+        
         # Initialize Google Docs integration
         self.docs_config = AmbassadorDocsConfig()
         if self.docs_config.DOCUMENT_ID:
@@ -135,17 +138,19 @@ class AmbassadorProgram:
             # Ambassadors table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ambassadors (
-                    discord_id TEXT PRIMARY KEY,
-                    username TEXT,
-                    social_handles TEXT,
-                    target_platforms TEXT,
-                    joined_date TEXT,
-                    total_points INTEGER DEFAULT 0,
-                    current_month_points INTEGER DEFAULT 0,
-                    consecutive_months INTEGER DEFAULT 0,
-                    reward_tier TEXT DEFAULT 'none',
-                    status TEXT DEFAULT 'active'
-                )
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_id TEXT UNIQUE NOT NULL,
+                username TEXT NOT NULL,
+                social_handles TEXT,
+                platforms TEXT,
+                current_month_points INTEGER DEFAULT 0,
+                total_points INTEGER DEFAULT 0,
+                consecutive_months INTEGER DEFAULT 0,
+                reward_tier TEXT DEFAULT 'none',
+                status TEXT DEFAULT 'active',
+                weekly_posts TEXT DEFAULT '0000',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
             ''')
             
             # Submissions table
@@ -424,7 +429,7 @@ class AmbassadorProgram:
                 cursor.execute('''
                     SELECT discord_id, username, current_month_points 
                     FROM ambassadors 
-                    WHERE status = 'active' AND current_month_points < 25
+                    WHERE status = 'active' AND current_month_points < 38
                 ''')
                 
                 behind_pace = cursor.fetchall()
@@ -432,7 +437,7 @@ class AmbassadorProgram:
                 for discord_id, username, points in behind_pace:
                     try:
                         user = await self.bot.fetch_user(int(discord_id))
-                        needed = 50 - points
+                        needed = 75 - points
                         
                         embed = discord.Embed(
                             title="🚀 Let's Keep the Momentum Going!",
@@ -440,8 +445,8 @@ class AmbassadorProgram:
                             color=0x3498db
                         )
                         embed.add_field(
-                            name="📊 Your Progress",
-                            value=f"You have **{points} points** this month - great start!",
+                            name="🎯 Monthly Goal",
+                            value=f"You need **{needed} more points** to reach your 75-point goal!",
                             inline=False
                         )
                         embed.add_field(
@@ -624,37 +629,44 @@ class AmbassadorProgram:
                             reward_earned, compliance_status, created_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ''', (
-                        current_month, discord_id, month_points,
+                        current_month, discord_id, total_points,
                         self.get_monthly_post_count(discord_id),
                         new_tier, compliance, datetime.now().isoformat()
                     ))
                     
                     # Update ambassador record
                     cursor.execute('''
-                        UPDATE ambassadors 
-                        SET current_month_points = 0, 
-                            consecutive_months = ?, 
-                            reward_tier = ?
-                        WHERE discord_id = ?
-                    ''', (consecutive, new_tier, discord_id))
-                
-                conn.commit()
-                
-                # Generate Google Docs report
-                if self.reporting_system:
-                    await self.reporting_system.generate_monthly_report()
+                    UPDATE ambassadors 
+                    SET current_month_points = 0, 
+                        weekly_posts = '0000',
+                        consecutive_months = CASE 
+                            WHEN current_month_points + ? >= 75 THEN consecutive_months + 1 
+                            ELSE 0 
+                        END
+                    WHERE status = 'active'
+                ''', (self.calculate_monthly_streak_bonus(discord_id),))
+                    conn.commit()
+                    
+                    # Generate Google Docs report
+                    if self.reporting_system:
+                        await self.reporting_system.generate_monthly_report()
                 
         except Exception as e:
             print(f"❌ Error generating monthly reports: {e}")
     
-    def calculate_reward_tier(self, consecutive_months: int) -> str:
-        """Calculate reward tier based on consecutive months"""
-        if consecutive_months >= 12:
+    def calculate_reward_tier(self, consecutive_months: int, high_performer_months: int = 0) -> str:
+        """Calculate reward tier based on consecutive months and performance"""
+        # Loyal Ambassador: Consistent high performance (100+ pts for multiple months)
+        if high_performer_months >= 6:  # 6+ months of 100+ points
+            return "loyal_ambassador"
+        elif consecutive_months >= 12:
             return "lifetime_commissions"
         elif consecutive_months >= 9:
             return "commission_bump_5pct"
         elif consecutive_months >= 6:
             return "6month_recurring"
+        elif consecutive_months >= 3 and high_performer_months >= 3:  # 100+ pts for 3 months
+            return "commission_bump_5pct"
         elif consecutive_months >= 3:
             return "3month_recurring"
         else:
@@ -739,109 +751,15 @@ class AmbassadorProgram:
                             elif screenshots:
                                 await self._recover_screenshot_submission(message, ambassador, screenshots[0])
                             
+                            # New function call
+                            await self.handle_submission(message, ambassador)
                             recovered_submissions += 1
-                            
-                except discord.Forbidden:
-                    print(f"⚠️ No access to channel: {channel.name}")
-                    continue
+                
                 except Exception as e:
-                    print(f"❌ Error processing channel {channel.name}: {e}")
-                    continue
+                    print(f"❌ Error recovering from channel {channel.name}: {e}")
             
-            print(f"✅ Recovery complete: {recovered_submissions} submissions recovered")
-            
-        except Exception as e:
-            print(f"❌ Error during recovery: {e}")
-    
-    async def _recover_url_submission(self, message, ambassador_data, url):
-        """Recover a URL submission from logs"""
-        try:
-            discord_id = ambassador_data[0]
-            platform, post_type = self._detect_platform_from_url(url)
-            
-            # Basic engagement for recovery
-            engagement = EngagementMetrics(likes=0, comments=0, shares=0, views=0)
-            points = self.calculate_points(post_type, engagement)
-            
-            submission = AmbassadorSubmission(
-                ambassador_id=discord_id,
-                platform=platform,
-                post_type=post_type,
-                url=url,
-                screenshot_hash=None,
-                engagement=engagement,
-                content_preview=message.content[:100],
-                timestamp=message.created_at,
-                points_awarded=points,
-                is_duplicate=False,
-                validity_status="accepted",
-                gemini_analysis=None
-            )
-            
-            await self.store_submission(submission)
-            print(f"📝 Recovered URL submission from {ambassador_data[1]}")
-            
-        except Exception as e:
-            print(f"❌ Error recovering URL submission: {e}")
-    
-    async def _recover_screenshot_submission(self, message, ambassador_data, screenshot):
-        """Recover a screenshot submission from logs"""
-        try:
-            discord_id = ambassador_data[0]
-            
-            # Download screenshot for analysis
-            screenshot_data = await screenshot.read()
-            content_hash = self.generate_content_hash(message.content, image_data=screenshot_data)
-            
-            # Analyze with Gemini if available
-            if self.gemini_model:
-                analysis = await self.analyze_screenshot_with_gemini(screenshot_data, f"Recovery: {message.content}")
-            else:
-                analysis = {"platform": "instagram", "post_type": "post", "engagement_metrics": {"likes": 0, "comments": 0}}
-            
-            # Extract platform and post type
-            try:
-                platform = Platform(analysis.get('platform', 'instagram'))
-            except ValueError:
-                platform = Platform.INSTAGRAM
-            
-            try:
-                post_type_str = analysis.get('post_type', 'post')
-                if 'video' in post_type_str.lower():
-                    post_type = PostType.INSTAGRAM_REEL
-                else:
-                    post_type = PostType.INSTAGRAM_POST
-            except:
-                post_type = PostType.INSTAGRAM_POST
-            
-            # Extract engagement
-            engagement_data = analysis.get('engagement_metrics', {})
-            engagement = EngagementMetrics(
-                likes=engagement_data.get('likes', 0),
-                comments=engagement_data.get('comments', 0),
-                shares=engagement_data.get('shares', 0),
-                views=engagement_data.get('views', 0)
-            )
-            
-            points = self.calculate_points(post_type, engagement)
-            
-            submission = AmbassadorSubmission(
-                ambassador_id=discord_id,
-                platform=platform,
-                post_type=post_type,
-                url=None,
-                screenshot_hash=content_hash,
-                engagement=engagement,
-                content_preview=analysis.get('content_preview', message.content[:100]),
-                timestamp=message.created_at,
-                points_awarded=points,
-                is_duplicate=False,
-                validity_status="accepted",
-                gemini_analysis=analysis
-            )
-            
-            await self.store_submission(submission)
-            print(f"📸 Recovered screenshot submission from {ambassador_data[1]}")
+            print(f"✅ Recovered {recovered_submissions} submissions from logs")
+        
             
         except Exception as e:
             print(f"❌ Error recovering screenshot submission: {e}")

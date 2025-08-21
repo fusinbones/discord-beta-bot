@@ -2091,19 +2091,29 @@ class BetaTestingBot(commands.Bot):
                     print(f"❌ Error checking ambassador status: {e}")
             
             # Handle Ambassador Program category channels and specific ambassador channels
+            # Exclude beta-testing channels from ambassador point counting
             elif message.guild and (
                 (message.channel.category and "ambassador program" in message.channel.category.name.lower()) or
                 message.channel.id == 1407762085214949437  # #sidekick-tools-ambassadors
+            ) and not (
+                message.channel.category and "beta" in message.channel.category.name.lower()
             ):
                 try:
-                    with sqlite3.connect('ambassador_program.db') as conn:
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
-                        ambassador = cursor.fetchone()
+                    # Only process if message contains URLs or attachments (actual submissions)
+                    import re
+                    url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+                    urls = re.findall(url_pattern, message.content)
+                    has_attachments = bool(message.attachments)
                     
-                    if ambassador:
-                        await handle_ambassador_submission(message, ambassador)
-                        return  # Don't process further if it's an ambassador submission
+                    if urls or has_attachments:
+                        with sqlite3.connect('ambassador_program.db') as conn:
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(message.author.id),))
+                            ambassador = cursor.fetchone()
+                        
+                        if ambassador:
+                            await handle_ambassador_submission(message, ambassador)
+                            return  # Don't process further if it's an ambassador submission
                 except Exception as e:
                     print(f"❌ Error processing ambassador channel submission: {e}")
                 
@@ -5259,16 +5269,17 @@ async def ambassador_command(ctx, action=None, user=None):
             
             embed.add_field(
                 name="🎯 Monthly Goal",
-                value="Earn **50+ points** each month to maintain ambassador status and unlock rewards!",
+                value="Earn **75+ points** each month to maintain free service and unlock rewards!",
                 inline=False
             )
             
             embed.add_field(
-                name="🏆 Reward Tiers",
+                name="🎁 Reward Tiers",
                 value="""
-                • **3 months:** 3-month recurring commissions
-                • **6 months:** 6-month recurring commissions  
-                • **9 months:** +5% commission bump
+                • **3 months:** 🎯 **3-month recurring commissions**
+                • **100+ pts for 3 months:** 📈 **+5% commission bump**
+                • **6 months:** 💰 **6-month recurring commissions**
+                • **100+ pts for 6+ months:** 👑 **Loyal Ambassador (30% lifetime)**
                 • **12 months:** 🎉 **Lifetime commissions!**
                 """,
                 inline=False
@@ -5285,8 +5296,12 @@ async def ambassador_command(ctx, action=None, user=None):
             )
             
             embed.add_field(
-                name="📈 Progress Tracking",
-                value="I'll send you updates on your progress and gentle reminders if you're falling behind. Let's work together to hit those goals!",
+                name="📈 Progress Tracking & Referrals",
+                value="""
+                I'll send you updates on your progress and gentle reminders if you're falling behind. 
+                
+                **💡 Pro Tip:** Share your Sidekick referral code! It gives trial users a huge discount on their first month and earns you commissions.
+                """,
                 inline=False
             )
             
@@ -5585,6 +5600,7 @@ async def ambassador_help_command(ctx):
         • Instagram: 8 pts
         • Twitter: 6 pts
         • Stories: 3 pts
+        • **Weekly Streak Bonus: +10 pts** (post every week)
         + Engagement bonuses!
         """,
         inline=False
@@ -5592,7 +5608,7 @@ async def ambassador_help_command(ctx):
     
     embed.add_field(
         name="🎯 Monthly Goal",
-        value="Earn 50+ points each month to maintain status and unlock rewards!",
+        value="Earn **75+ points** each month to maintain free service!",
         inline=False
     )
     
