@@ -1971,17 +1971,16 @@ class BetaTestingBot(commands.Bot):
             self.ambassador_program.monthly_check.start()
             print('✅ Ambassador Program monthly check task started')
             
-        # Initialize Ambassador Program database
+        # Verify Ambassador Program Supabase connection
         if hasattr(self, 'ambassador_program'):
-            self.ambassador_program.init_local_database()
-            print('✅ Ambassador Program database initialized')
+            print('✅ Ambassador Program using Supabase-only storage')
             
-            # Sync ambassador data from Supabase to local DB on startup
-            await self.sync_ambassador_data_on_startup()
+            # Verify Supabase connection and ambassador data
+            await self.verify_supabase_connection()
             
-        # Load configuration first
-        await self.load_config()
-        
+            # Load configuration first
+            await self.load_config()
+            
         # Send startup notification to beta channels
         await self.send_startup_notification()
         
@@ -1992,6 +1991,30 @@ class BetaTestingBot(commands.Bot):
         self.schedule_update_task.start()
         self.ambassador_chat_sync_task.start()
         self.staff_notification_task.start()
+    
+    async def verify_supabase_connection(self):
+        """Verify Supabase connection and ambassador data availability"""
+        if not hasattr(self, 'ambassador_program') or not self.ambassador_program.supabase:
+            print("❌ Supabase not available - ambassador program will not function")
+            return False
+        
+        try:
+            print("🔄 Verifying Supabase ambassador data...")
+            result = self.ambassador_program.supabase.table('ambassadors').select('discord_id', 'username', 'status').eq('status', 'active').execute()
+            active_ambassadors = result.data
+            
+            print(f"✅ Found {len(active_ambassadors)} active ambassadors in Supabase")
+            for ambassador in active_ambassadors[:5]:  # Show first 5
+                print(f"   - {ambassador['username']} (ID: {ambassador['discord_id']})")
+            
+            if len(active_ambassadors) > 5:
+                print(f"   ... and {len(active_ambassadors) - 5} more")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Supabase verification failed: {e}")
+            return False
     
     async def sync_ambassador_data_on_startup(self):
         """Sync ambassador data from Supabase to local DB on bot startup"""

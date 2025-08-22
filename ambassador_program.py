@@ -84,11 +84,15 @@ class AmbassadorProgram:
         self.supabase_key = os.getenv('SUPABASE_ANON_KEY')
         self.supabase: Client = None
         
-        # Initialize Supabase if credentials available and library installed
-        if SUPABASE_AVAILABLE and self.supabase_url and self.supabase_key:
-            self.supabase = create_client(self.supabase_url, self.supabase_key)
-        else:
-            self.supabase = None
+        # Initialize Supabase - REQUIRED for ambassador program
+        if not SUPABASE_AVAILABLE:
+            raise Exception("Supabase library not installed - ambassador program requires cloud database")
+        
+        if not self.supabase_url or not self.supabase_key:
+            raise Exception("Supabase credentials not found - set SUPABASE_URL and SUPABASE_ANON_KEY environment variables")
+        
+        self.supabase = create_client(self.supabase_url, self.supabase_key)
+        print("✅ Ambassador program initialized with Supabase-only storage")
         
         # Initialize Gemini Vision
         self.gemini_api_key = os.getenv('GEMINI_API_KEY')
@@ -125,8 +129,8 @@ class AmbassadorProgram:
             self.docs_manager = None
             self.reporting_system = None
         
-        # Initialize local database for fallback
-        self.init_local_database()
+        # Verify Supabase tables exist
+        self.verify_supabase_tables()
         
         # Don't start task here - will be started in on_ready event
     
@@ -188,6 +192,28 @@ class AmbassadorProgram:
             ''')
             
             conn.commit()
+    
+    def init_local_database(self):
+        """Legacy method - no longer used with Supabase-only architecture"""
+        pass
+    
+    def verify_supabase_tables(self):
+        """Verify that required Supabase tables exist"""
+        try:
+            # Test ambassadors table
+            result = self.supabase.table('ambassadors').select('discord_id').limit(1).execute()
+            print("✅ Ambassadors table verified in Supabase")
+            
+            # Test submissions table
+            result = self.supabase.table('submissions').select('id').limit(1).execute()
+            print("✅ Submissions table verified in Supabase")
+            
+        except Exception as e:
+            print(f"❌ Supabase table verification failed: {e}")
+            print("⚠️ Make sure your Supabase project has the required tables:")
+            print("   - ambassadors (discord_id, username, social_handles, platforms, current_month_points, total_points, consecutive_months, reward_tier, status)")
+            print("   - submissions (ambassador_id, platform, post_type, url, screenshot_hash, engagement_data, content_preview, timestamp, points_awarded, is_duplicate, validity_status, gemini_analysis)")
+            raise e
     
     async def analyze_screenshot_with_gemini(self, image_data: bytes, submission_context: str = "") -> Dict:
         """Analyze screenshot using Google Gemini Vision"""
@@ -289,119 +315,73 @@ class AmbassadorProgram:
         
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
     
+    async def get_ambassador_by_discord_id(self, discord_id: int) -> Optional[str]:
+        """Get ambassador ID by Discord ID - returns ambassador_id if found, None if not"""
+        try:
+            result = self.supabase.table('ambassadors').select('discord_id').eq('discord_id', str(discord_id)).eq('status', 'active').execute()
+            if result.data:
+                return result.data[0]['discord_id']
+            return None
+                
+        except Exception as e:
+            print(f"❌ Error looking up ambassador {discord_id}: {e}")
+            return None
+    
     async def check_duplicate_submission(self, content_hash: str, ambassador_id: str) -> bool:
         """Check if submission is a duplicate"""
         try:
-            # Check local database first
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT id FROM submissions 
-                    WHERE (screenshot_hash = ? OR url = ?) 
-                    AND ambassador_id = ?
-                ''', (content_hash, content_hash, ambassador_id))
-                
-                if cursor.fetchone():
-                    return True
-            
-            # Check Supabase if available
-            if self.supabase:
-                try:
-                    result = self.supabase.table('submissions').select('id').eq('ambassador_id', ambassador_id).or_(
-                        f'screenshot_hash.eq.{content_hash},url.eq.{content_hash}'
-                    ).execute()
-                    
-                    if result.data:
-                        return True
-                except Exception as supabase_error:
-                    print(f"⚠️ Supabase check failed, using local database only: {supabase_error}")
-                    # Continue with local database only
-            
-            return False
+            result = self.supabase.table('submissions').select('id').or_(f'screenshot_hash.eq.{content_hash},url.eq.{content_hash}').eq('ambassador_id', ambassador_id).execute()
+            return len(result.data) > 0
             
         except Exception as e:
-            print(f"❌ Error checking duplicates: {e}")
+            print(f"❌ Error checking for duplicates: {e}")
             return False
     
     async def store_submission(self, submission: AmbassadorSubmission) -> bool:
-        """Store submission in both local DB and Supabase"""
+        """Store submission in Supabase"""
         try:
-            # Store in local database
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO submissions (
-                        ambassador_id, platform, post_type, url, screenshot_hash,
-                        engagement_data, content_preview, timestamp, points_awarded,
-                        is_duplicate, validity_status, gemini_analysis
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    submission.ambassador_id,
-                    submission.platform.value,
-                    submission.post_type.value,
-                    submission.url,
-                    submission.screenshot_hash,
-                    json.dumps(submission.engagement.__dict__),
-                    submission.content_preview,
-                    submission.timestamp.isoformat(),
-                    submission.points_awarded,
-                    submission.is_duplicate,
-                    submission.validity_status,
-                    json.dumps(submission.gemini_analysis) if submission.gemini_analysis else None
-                ))
-                conn.commit()
+            supabase_data = {
+                'ambassador_id': submission.ambassador_id,
+                'platform': submission.platform.value if hasattr(submission.platform, 'value') else str(submission.platform),
+                'post_type': submission.post_type.value if hasattr(submission.post_type, 'value') else str(submission.post_type),
+                'url': submission.url,
+                'screenshot_hash': submission.screenshot_hash,
+                'engagement_data': json.dumps(submission.engagement.__dict__) if submission.engagement else None,
+                'content_preview': submission.content_preview,
+                'points_awarded': submission.points_awarded,
+                'timestamp': submission.timestamp.isoformat(),
+                'is_duplicate': submission.is_duplicate,
+                'validity_status': submission.validity_status,
+                'gemini_analysis': json.dumps(submission.gemini_analysis) if submission.gemini_analysis else None
+            }
             
-            # Store in Supabase if available
-            if self.supabase:
-                try:
-                    supabase_data = {
-                        'ambassador_id': submission.ambassador_id,
-                        'platform': submission.platform.value if hasattr(submission.platform, 'value') else str(submission.platform),
-                        'post_type': submission.post_type.value if hasattr(submission.post_type, 'value') else str(submission.post_type),
-                        'url': submission.url,
-                        'screenshot_hash': submission.screenshot_hash,
-                        'points_awarded': submission.points_awarded,
-                        'timestamp': submission.timestamp.isoformat(),
-                        'validity_status': submission.validity_status
-                    }
-                    
-                    result = self.supabase.table('submissions').insert(supabase_data).execute()
-                    print(f"✅ Stored in Supabase: {submission.url or 'Screenshot'}")
-                except Exception as supabase_error:
-                    print(f"⚠️ Supabase storage failed, using local database only: {supabase_error}")
-                    # Continue with local database only
-            
-            # Update ambassador points
-            await self.update_ambassador_points(submission.ambassador_id, submission.points_awarded)
-            
+            result = self.supabase.table('submissions').insert(supabase_data).execute()
+            print(f"✅ Stored in Supabase: {submission.url or 'Screenshot'}")
             return True
             
+        except Exception as supabase_error:
+            print(f"⚠️ Supabase storage failed, using local database only: {supabase_error}")
+            # Continue with local database only
+            return True
+        
         except Exception as e:
             print(f"❌ Error storing submission: {e}")
             return False
     
     async def update_ambassador_points(self, ambassador_id: str, points: int):
-        """Update ambassador's point totals"""
+        """Update ambassador's point totals in Supabase"""
         try:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE ambassadors 
-                    SET total_points = total_points + ?, 
-                        current_month_points = current_month_points + ?
-                    WHERE discord_id = ?
-                ''', (points, points, ambassador_id))
-                conn.commit()
-            
-            if self.supabase:
-                # Get current points
-                result = self.supabase.table('ambassadors').select('total_points', 'current_month_points').eq('discord_id', ambassador_id).execute()
-                if result.data:
-                    current = result.data[0]
-                    self.supabase.table('ambassadors').update({
-                        'total_points': current['total_points'] + points,
-                        'current_month_points': current['current_month_points'] + points
-                    }).eq('discord_id', ambassador_id).execute()
+            # Get current points from Supabase
+            result = self.supabase.table('ambassadors').select('total_points', 'current_month_points').eq('discord_id', ambassador_id).execute()
+            if result.data:
+                current = result.data[0]
+                self.supabase.table('ambassadors').update({
+                    'total_points': current['total_points'] + points,
+                    'current_month_points': current['current_month_points'] + points
+                }).eq('discord_id', ambassador_id).execute()
+                print(f"✅ Updated points for {ambassador_id}: +{points} points")
+            else:
+                print(f"⚠️ Ambassador {ambassador_id} not found in Supabase")
                     
         except Exception as e:
             print(f"❌ Error updating points: {e}")
@@ -422,60 +402,52 @@ class AmbassadorProgram:
     async def send_midmonth_reminders(self):
         """Send encouraging reminders to ambassadors behind pace"""
         try:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT discord_id, username, current_month_points 
-                    FROM ambassadors 
-                    WHERE status = 'active' AND current_month_points < 38
-                ''')
+            result = self.supabase.table('ambassadors').select('discord_id', 'username', 'current_month_points').eq('status', 'active').lt('current_month_points', 50).execute()
+            behind_pace = result.data
                 
-                behind_pace = cursor.fetchall()
-                
-                for discord_id, username, points in behind_pace:
-                    try:
-                        user = await self.bot.fetch_user(int(discord_id))
-                        needed = 75 - points
+            for ambassador in behind_pace:
+                try:
+                    discord_id = ambassador['discord_id']
+                    username = ambassador['username']
+                    points = ambassador['current_month_points']
+                    
+                    user = await self.bot.fetch_user(int(discord_id))
+                    needed = 75 - points
+                    
+                    embed = discord.Embed(
+                        title="🚀 Let's Keep the Momentum Going!",
+                        description=f"Hey {username}! I'm Jim, and I wanted to check in on your ambassador journey.",
+                        color=0x3498db
+                    )
+                    embed.add_field(
+                        name="🎯 Monthly Goal",
+                        value=f"You need **{needed} more points** to reach your 75-point goal!",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="💡 Easy Ways to Earn Points",
+                        value="""• 🎥 Share a YouTube/TikTok video about Sidekick Tools (15 pts)
+• 📸 Post an Instagram story or reel (8 pts)
+• 🐦 Tweet about your experience (6 pts)
+• ❓ Answer a question on Reddit/Quora (12 pts)
+• 📊 Share a LinkedIn post about Sidekick Tools (10 pts)
+• 📄 Share a Facebook post about Sidekick Tools (8 pts)
+• 📸 Share a TikTok video about Sidekick Tools (12 pts)
+• 📊 Share a Twitter thread about Sidekick Tools (15 pts)""",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="🏆 What You're Working Toward",
+                        value="Consistent ambassadors unlock recurring commissions and exclusive rewards. You've got this!",
+                        inline=False
+                    )
+                    embed.set_footer(text="💬 Just DM me your content - I'll handle the rest!")
                         
-                        embed = discord.Embed(
-                            title="🚀 Let's Keep the Momentum Going!",
-                            description=f"Hey {username}! I'm Jim, and I wanted to check in on your ambassador journey.",
-                            color=0x3498db
-                        )
-                        embed.add_field(
-                            name="🎯 Monthly Goal",
-                            value=f"You need **{needed} more points** to reach your 75-point goal!",
-                            inline=False
-                        )
-                        embed.add_field(
-                            name="🎯 Path to Success",
-                            value=f"Just **{needed} more points** to hit your monthly goal and unlock rewards!",
-                            inline=False
-                        )
-                        embed.add_field(
-                            name="💡 Easy Ways to Earn Points",
-                            value="""
-                            • 🎥 Share a YouTube/TikTok video about Sidekick Tools (15 pts)
-                            • 📸 Post an Instagram story or reel (8 pts)
-                            • 🐦 Tweet about your experience (6 pts)
-                            • ❓ Answer a question on Reddit/Quora (12 pts)
-                            
-                            **Remember:** I automatically detect platforms and award points!
-                            """,
-                            inline=False
-                        )
-                        embed.add_field(
-                            name="🏆 What You're Working Toward",
-                            value="Consistent ambassadors unlock recurring commissions and exclusive rewards. You've got this!",
-                            inline=False
-                        )
-                        embed.set_footer(text="💬 Just DM me your content - I'll handle the rest!")
+                    await user.send(embed=embed)
+                    print(f"📨 Sent encouragement to {username} ({points} points)")
                         
-                        await user.send(embed=embed)
-                        print(f"📨 Sent encouragement to {username} ({points} points)")
-                        
-                    except Exception as e:
-                        print(f"❌ Failed to send reminder to {username}: {e}")
+                except Exception as e:
+                    print(f"❌ Failed to send reminder to {username}: {e}")
                         
         except Exception as e:
             print(f"❌ Error sending mid-month reminders: {e}")
