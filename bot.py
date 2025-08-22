@@ -2834,16 +2834,16 @@ class BetaTestingBot(commands.Bot):
                 print("⚠️ No ambassador channels found")
                 return
             
-            # Scan recent messages in ambassador channels
+            # Scan ALL messages in ambassador channels (full history)
             scanned_messages = 0
             processed_submissions = 0
             
             for channel in ambassador_channels:
                 try:
-                    # Scan last 6 hours of messages
-                    after_time = datetime.now() - timedelta(hours=6)
+                    print(f"📚 Scanning full history of #{channel.name}...")
                     
-                    async for message in channel.history(limit=200, after=after_time):
+                    # Scan ALL messages (no time limit)
+                    async for message in channel.history(limit=None):
                         scanned_messages += 1
                         
                         # Skip bot messages
@@ -2855,32 +2855,79 @@ class BetaTestingBot(commands.Bot):
                         has_attachment = len(message.attachments) > 0
                         
                         if has_url or has_attachment:
-                            # Check if this is an ambassador
-                            ambassador_id = await self.ambassador_program.get_ambassador_by_discord_id(message.author.id)
-                            
-                            if ambassador_id:
-                                # Process as potential submission
-                                if has_url:
-                                    urls = [word for word in message.content.split() if word.startswith(('http://', 'https://'))]
-                                    for url in urls:
-                                        # Check if already processed
-                                        content_hash = self.ambassador_program.generate_content_hash(message.content, url)
-                                        is_duplicate = await self.ambassador_program.check_duplicate_submission(content_hash, ambassador_id)
-                                        
-                                        if not is_duplicate:
-                                            await process_url_submission(message, ambassador_id, url)
-                                            processed_submissions += 1
+                            # Check if this is an ambassador using Supabase
+                            try:
+                                result = self.ambassador_program.supabase.table('ambassadors').select('discord_id', 'username').eq('discord_id', str(message.author.id)).eq('status', 'active').execute()
                                 
-                                if has_attachment:
-                                    for attachment in message.attachments:
-                                        if attachment.content_type and attachment.content_type.startswith('image/'):
-                                            # Check if already processed
-                                            content_hash = self.ambassador_program.generate_content_hash(message.content, attachment.url)
-                                            is_duplicate = await self.ambassador_program.check_duplicate_submission(content_hash, ambassador_id)
+                                if result.data:
+                                    ambassador = result.data[0]
+                                    ambassador_id = ambassador['discord_id']
+                                    
+                                    # Process URLs
+                                    if has_url:
+                                        urls = [word for word in message.content.split() if word.startswith(('http://', 'https://'))]
+                                        for url in urls:
+                                            # Create unique hash for duplicate detection
+                                            import hashlib
+                                            content_hash = hashlib.md5(f"{ambassador_id}_{url}_{message.id}".encode()).hexdigest()
                                             
-                                            if not is_duplicate:
-                                                await process_screenshot_submission(message, ambassador_id, attachment.url)
+                                            # Check if already in submissions table
+                                            existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
+                                            
+                                            if not existing.data:
+                                                # Determine platform and post type from URL
+                                                platform = self.detect_platform_from_url(url)
+                                                post_type = self.detect_post_type_from_url(url)
+                                                
+                                                # Add to submissions table
+                                                submission_data = {
+                                                    'ambassador_id': ambassador_id,
+                                                    'platform': platform,
+                                                    'post_type': post_type,
+                                                    'url': url,
+                                                    'screenshot_hash': content_hash,
+                                                    'content_preview': message.content[:200],
+                                                    'timestamp': message.created_at.isoformat(),
+                                                    'points_awarded': 0,
+                                                    'is_duplicate': False,
+                                                    'validity_status': 'pending'
+                                                }
+                                                
+                                                self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
                                                 processed_submissions += 1
+                                    
+                                    # Process attachments (screenshots)
+                                    if has_attachment:
+                                        for attachment in message.attachments:
+                                            if attachment.content_type and attachment.content_type.startswith('image/'):
+                                                # Create unique hash for duplicate detection
+                                                import hashlib
+                                                content_hash = hashlib.md5(f"{ambassador_id}_{attachment.url}_{message.id}".encode()).hexdigest()
+                                                
+                                                # Check if already in submissions table
+                                                existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
+                                                
+                                                if not existing.data:
+                                                    # Add screenshot submission
+                                                    submission_data = {
+                                                        'ambassador_id': ambassador_id,
+                                                        'platform': 'screenshot',
+                                                        'post_type': 'screenshot',
+                                                        'url': attachment.url,
+                                                        'screenshot_hash': content_hash,
+                                                        'content_preview': message.content[:200],
+                                                        'timestamp': message.created_at.isoformat(),
+                                                        'points_awarded': 0,
+                                                        'is_duplicate': False,
+                                                        'validity_status': 'pending'
+                                                    }
+                                                    
+                                                    self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
+                                                    processed_submissions += 1
+                                                    
+                            except Exception as e:
+                                print(f"❌ Error processing message from {message.author.name}: {e}")
+                                continue
                 
                 except Exception as e:
                     print(f"❌ Error scanning channel {channel.name}: {e}")
@@ -2890,6 +2937,51 @@ class BetaTestingBot(commands.Bot):
             
         except Exception as e:
             print(f"❌ Error in ambassador chat sync: {e}")
+    
+    def detect_platform_from_url(self, url):
+        """Detect platform from URL"""
+        url_lower = url.lower()
+        if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+            return 'youtube'
+        elif 'tiktok.com' in url_lower:
+            return 'tiktok'
+        elif 'instagram.com' in url_lower:
+            return 'instagram'
+        elif 'twitter.com' in url_lower or 'x.com' in url_lower:
+            return 'twitter'
+        elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
+            return 'facebook'
+        elif 'reddit.com' in url_lower:
+            return 'reddit'
+        elif 'quora.com' in url_lower:
+            return 'quora'
+        elif 'linkedin.com' in url_lower:
+            return 'linkedin'
+        else:
+            return 'other'
+    
+    def detect_post_type_from_url(self, url):
+        """Detect post type from URL"""
+        url_lower = url.lower()
+        if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+            return 'video'
+        elif 'tiktok.com' in url_lower:
+            return 'video'
+        elif 'instagram.com' in url_lower:
+            if '/reel/' in url_lower:
+                return 'reel'
+            elif '/p/' in url_lower:
+                return 'post'
+            else:
+                return 'story'
+        elif 'twitter.com' in url_lower or 'x.com' in url_lower:
+            return 'tweet'
+        elif 'reddit.com' in url_lower:
+            return 'post'
+        elif 'quora.com' in url_lower:
+            return 'answer'
+        else:
+            return 'post'
     
     @tasks.loop(hours=12)  # Check twice daily
     async def staff_notification_task(self):
@@ -6572,8 +6664,22 @@ async def ambassadors_report(ctx, action=None):
         except Exception as e:
             await ctx.send(f"❌ Error generating report: {e}")
     
+    elif action == "sync":
+        # Manual trigger for full ambassador history sync
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to trigger ambassador sync.")
+            return
+        
+        await ctx.send("🔄 Starting full ambassador history sync... This may take a few minutes.")
+        
+        try:
+            await bot.ambassador_chat_sync_task()
+            await ctx.send("✅ Ambassador history sync completed!")
+        except Exception as e:
+            await ctx.send(f"❌ Error during sync: {e}")
+    
     else:
-        await ctx.send("Use `!ambassadors report` to see the current leaderboard.")
+        await ctx.send("Use `!ambassadors report` to see the current leaderboard or `!ambassadors sync` to manually sync submissions.")
 
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
