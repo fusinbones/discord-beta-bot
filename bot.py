@@ -6425,37 +6425,7 @@ async def ambassador_detail(ctx, user: discord.Member = None):
     except Exception as e:
         await ctx.send(f"❌ Error getting ambassador details: {e}")
 
-# Add recovery command for Ambassador Program
-@bot.command(name='ambassador-recover')
-async def ambassador_recover(ctx):
-    """Recover ambassador submissions from Discord logs"""
-    if not has_staff_role(ctx.author, ctx.guild):
-        await ctx.send("❌ You need the Staff role or Manage Server permissions to use recovery commands.")
-        return
-    
-    try:
-        embed = discord.Embed(
-            title="🔄 Starting Ambassador Program Recovery",
-            description="Scanning Discord logs for missed submissions...",
-            color=0x3498db
-        )
-        status_msg = await ctx.send(embed=embed)
-        
-        # Run recovery
-        await bot.ambassador_program.recover_from_logs()
-        
-        # Update status
-        embed = discord.Embed(
-            title="✅ Recovery Complete",
-            description="Ambassador program data has been recovered from Discord logs.",
-            color=0x00ff00
-        )
-        embed.add_field(name="📊 Next Steps", value="Use `!ambassadors report` to see updated data", inline=False)
-        
-        await status_msg.edit(embed=embed)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Error during recovery: {e}")
+# Duplicate ambassador-recover command removed - using the one defined earlier with staff role checks
 
 @bot.command(name='ambassador-docs')
 async def ambassador_docs_sync(ctx):
