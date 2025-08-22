@@ -129,7 +129,7 @@ class AmbassadorProgram:
             self.docs_manager = None
             self.reporting_system = None
         
-        # Verify Supabase tables exist
+        # Verify Supabase tables exist (non-blocking)
         self.verify_supabase_tables()
         
         # Don't start task here - will be started in on_ready event
@@ -209,11 +209,13 @@ class AmbassadorProgram:
             print("✅ Submissions table verified in Supabase")
             
         except Exception as e:
-            print(f"❌ Supabase table verification failed: {e}")
+            print(f"⚠️ Supabase table verification failed: {e}")
+            print("⚠️ Ambassador program will be disabled until tables are created")
             print("⚠️ Make sure your Supabase project has the required tables:")
             print("   - ambassadors (discord_id, username, social_handles, platforms, current_month_points, total_points, consecutive_months, reward_tier, status)")
             print("   - submissions (ambassador_id, platform, post_type, url, screenshot_hash, engagement_data, content_preview, timestamp, points_awarded, is_duplicate, validity_status, gemini_analysis)")
-            raise e
+            # Don't raise - let bot continue without ambassador program
+            self.supabase = None  # Disable Supabase functionality
     
     async def analyze_screenshot_with_gemini(self, image_data: bytes, submission_context: str = "") -> Dict:
         """Analyze screenshot using Google Gemini Vision"""
@@ -317,6 +319,9 @@ class AmbassadorProgram:
     
     async def get_ambassador_by_discord_id(self, discord_id: int) -> Optional[str]:
         """Get ambassador ID by Discord ID - returns ambassador_id if found, None if not"""
+        if not self.supabase:
+            return None  # Ambassador program disabled
+            
         try:
             result = self.supabase.table('ambassadors').select('discord_id').eq('discord_id', str(discord_id)).eq('status', 'active').execute()
             if result.data:
@@ -329,6 +334,9 @@ class AmbassadorProgram:
     
     async def check_duplicate_submission(self, content_hash: str, ambassador_id: str) -> bool:
         """Check if submission is a duplicate"""
+        if not self.supabase:
+            return False  # Ambassador program disabled
+            
         try:
             result = self.supabase.table('submissions').select('id').or_(f'screenshot_hash.eq.{content_hash},url.eq.{content_hash}').eq('ambassador_id', ambassador_id).execute()
             return len(result.data) > 0
@@ -339,6 +347,10 @@ class AmbassadorProgram:
     
     async def store_submission(self, submission: AmbassadorSubmission) -> bool:
         """Store submission in Supabase"""
+        if not self.supabase:
+            print("⚠️ Ambassador program disabled - submission not stored")
+            return False
+            
         try:
             supabase_data = {
                 'ambassador_id': submission.ambassador_id,
@@ -359,17 +371,16 @@ class AmbassadorProgram:
             print(f"✅ Stored in Supabase: {submission.url or 'Screenshot'}")
             return True
             
-        except Exception as supabase_error:
-            print(f"⚠️ Supabase storage failed, using local database only: {supabase_error}")
-            # Continue with local database only
-            return True
-        
         except Exception as e:
             print(f"❌ Error storing submission: {e}")
             return False
     
     async def update_ambassador_points(self, ambassador_id: str, points: int):
         """Update ambassador's point totals in Supabase"""
+        if not self.supabase:
+            print("⚠️ Ambassador program disabled - points not updated")
+            return
+            
         try:
             # Get current points from Supabase
             result = self.supabase.table('ambassadors').select('total_points', 'current_month_points').eq('discord_id', ambassador_id).execute()
@@ -401,6 +412,10 @@ class AmbassadorProgram:
     
     async def send_midmonth_reminders(self):
         """Send encouraging reminders to ambassadors behind pace"""
+        if not self.supabase:
+            print("⚠️ Ambassador program disabled - skipping reminders")
+            return
+            
         try:
             result = self.supabase.table('ambassadors').select('discord_id', 'username', 'current_month_points').eq('status', 'active').lt('current_month_points', 50).execute()
             behind_pace = result.data

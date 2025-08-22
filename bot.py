@@ -1978,6 +1978,9 @@ class BetaTestingBot(commands.Bot):
             # Verify Supabase connection and ambassador data
             await self.verify_supabase_connection()
             
+            # Auto-sync ambassadors from Discord roles
+            await self.sync_ambassadors_from_roles()
+            
             # Load configuration first
             await self.load_config()
             
@@ -1991,6 +1994,70 @@ class BetaTestingBot(commands.Bot):
         self.schedule_update_task.start()
         self.ambassador_chat_sync_task.start()
         self.staff_notification_task.start()
+
+    async def on_member_update(self, before, after):
+        """Handle member role changes - auto-sync ambassador status"""
+        if not hasattr(self, 'ambassador_program') or not self.ambassador_program.supabase:
+            return
+        
+        # Check if roles changed
+        before_roles = {role.name.lower() for role in before.roles}
+        after_roles = {role.name.lower() for role in after.roles}
+        
+        # Check for ambassador role changes
+        had_ambassador_role = 'ambassador' in before_roles or 'ambassadors' in before_roles
+        has_ambassador_role = 'ambassador' in after_roles or 'ambassadors' in after_roles
+        
+        if had_ambassador_role == has_ambassador_role:
+            return  # No ambassador role change
+        
+        discord_id = str(after.id)
+        username = after.display_name or after.name
+        
+        try:
+            if has_ambassador_role and not had_ambassador_role:
+                # User gained ambassador role - add or reactivate
+                print(f"🎉 {username} gained Ambassador role - adding to database")
+                
+                # Check if already exists
+                result = self.ambassador_program.supabase.table('ambassadors').select('*').eq('discord_id', discord_id).execute()
+                
+                if result.data:
+                    # Reactivate existing ambassador
+                    self.ambassador_program.supabase.table('ambassadors').update({
+                        'status': 'active',
+                        'username': username
+                    }).eq('discord_id', discord_id).execute()
+                    print(f"   ✅ Reactivated existing ambassador: {username}")
+                else:
+                    # Add new ambassador
+                    ambassador_data = {
+                        'discord_id': discord_id,
+                        'username': username,
+                        'social_handles': '',
+                        'platforms': 'all',
+                        'current_month_points': 0,
+                        'total_points': 0,
+                        'consecutive_months': 0,
+                        'reward_tier': 'none',
+                        'status': 'active',
+                        'weekly_posts': '0000'
+                    }
+                    
+                    self.ambassador_program.supabase.table('ambassadors').insert(ambassador_data).execute()
+                    print(f"   ✅ Added new ambassador: {username}")
+                    
+            elif had_ambassador_role and not has_ambassador_role:
+                # User lost ambassador role - deactivate
+                print(f"⚠️ {username} lost Ambassador role - deactivating in database")
+                
+                self.ambassador_program.supabase.table('ambassadors').update({
+                    'status': 'inactive'
+                }).eq('discord_id', discord_id).execute()
+                print(f"   ✅ Deactivated ambassador: {username}")
+                
+        except Exception as e:
+            print(f"❌ Error updating ambassador status for {username}: {e}")
     
     async def verify_supabase_connection(self):
         """Verify Supabase connection and ambassador data availability"""
@@ -2015,6 +2082,129 @@ class BetaTestingBot(commands.Bot):
         except Exception as e:
             print(f"❌ Supabase verification failed: {e}")
             return False
+
+    async def sync_ambassadors_from_roles(self):
+        """Automatically sync ambassadors based on Discord @Ambassador role"""
+        if not hasattr(self, 'ambassador_program') or not self.ambassador_program.supabase:
+            print("⚠️ Ambassador program not available - skipping role sync")
+            return
+        
+        print("🔄 Syncing ambassadors from Discord roles...")
+        
+        try:
+            # Get existing ambassadors from database
+            result = self.ambassador_program.supabase.table('ambassadors').select('discord_id', 'username', 'status').execute()
+            existing_ambassadors = {amb['discord_id']: amb for amb in result.data}
+            
+            new_ambassadors = 0
+            updated_ambassadors = 0
+            
+            # Check all guilds for users with Ambassador role
+            for guild in self.guilds:
+                print(f"🔍 Checking guild: {guild.name}")
+                
+                # Find Ambassador role (case insensitive)
+                ambassador_role = None
+                for role in guild.roles:
+                    if role.name.lower() in ['ambassador', 'ambassadors']:
+                        ambassador_role = role
+                        break
+                
+                if not ambassador_role:
+                    print(f"   ⚠️ No Ambassador role found in {guild.name}")
+                    continue
+                
+                print(f"   ✅ Found Ambassador role: {ambassador_role.name}")
+                
+                # Get all members with Ambassador role
+                ambassador_members = [member for member in guild.members if ambassador_role in member.roles]
+                print(f"   📋 Found {len(ambassador_members)} members with Ambassador role")
+                
+                for member in ambassador_members:
+                    # Skip bots
+                    if member.bot:
+                        continue
+                    
+                    discord_id = str(member.id)
+                    username = member.display_name or member.name
+                    
+                    if discord_id in existing_ambassadors:
+                        # Update existing ambassador if inactive
+                        existing_amb = existing_ambassadors[discord_id]
+                        if existing_amb['status'] != 'active':
+                            print(f"   🔄 Reactivating ambassador: {username}")
+                            self.ambassador_program.supabase.table('ambassadors').update({
+                                'status': 'active',
+                                'username': username
+                            }).eq('discord_id', discord_id).execute()
+                            updated_ambassadors += 1
+                        elif existing_amb['username'] != username:
+                            # Update username if changed
+                            print(f"   📝 Updating username: {existing_amb['username']} → {username}")
+                            self.ambassador_program.supabase.table('ambassadors').update({
+                                'username': username
+                            }).eq('discord_id', discord_id).execute()
+                            updated_ambassadors += 1
+                    else:
+                        # Add new ambassador
+                        print(f"   ➕ Adding new ambassador: {username} (ID: {discord_id})")
+                        
+                        ambassador_data = {
+                            'discord_id': discord_id,
+                            'username': username,
+                            'social_handles': '',
+                            'platforms': 'all',
+                            'current_month_points': 0,
+                            'total_points': 0,
+                            'consecutive_months': 0,
+                            'reward_tier': 'none',
+                            'status': 'active',
+                            'weekly_posts': '0000'
+                        }
+                        
+                        self.ambassador_program.supabase.table('ambassadors').insert(ambassador_data).execute()
+                        new_ambassadors += 1
+            
+            # Check for ambassadors who no longer have the role
+            deactivated_ambassadors = 0
+            for discord_id, ambassador in existing_ambassadors.items():
+                if ambassador['status'] != 'active':
+                    continue
+                
+                # Check if user still has ambassador role in any guild
+                still_ambassador = False
+                for guild in self.guilds:
+                    try:
+                        member = guild.get_member(int(discord_id))
+                        if member:
+                            ambassador_role = None
+                            for role in guild.roles:
+                                if role.name.lower() in ['ambassador', 'ambassadors']:
+                                    ambassador_role = role
+                                    break
+                            
+                            if ambassador_role and ambassador_role in member.roles:
+                                still_ambassador = True
+                                break
+                    except:
+                        continue
+                
+                if not still_ambassador:
+                    print(f"   ⚠️ Deactivating ambassador (no longer has role): {ambassador['username']}")
+                    self.ambassador_program.supabase.table('ambassadors').update({
+                        'status': 'inactive'
+                    }).eq('discord_id', discord_id).execute()
+                    deactivated_ambassadors += 1
+            
+            print(f"✅ Ambassador role sync complete:")
+            print(f"   ➕ New ambassadors: {new_ambassadors}")
+            print(f"   🔄 Updated ambassadors: {updated_ambassadors}")
+            print(f"   ⚠️ Deactivated ambassadors: {deactivated_ambassadors}")
+            
+        except Exception as e:
+            print(f"❌ Error syncing ambassadors from roles: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def sync_ambassador_data_on_startup(self):
         """Sync ambassador data from Supabase to local DB on bot startup"""
