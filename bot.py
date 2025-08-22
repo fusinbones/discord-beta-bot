@@ -6524,16 +6524,17 @@ async def ambassadors_report(ctx, action=None):
     
     if action == "report":
         try:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT discord_id, username, current_month_points, total_points, 
-                           consecutive_months, reward_tier, status
-                    FROM ambassadors 
-                    WHERE status = 'active'
-                    ORDER BY current_month_points DESC
-                ''')
-                ambassadors = cursor.fetchall()
+            # Use Supabase instead of local SQLite database
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            result = bot.ambassador_program.supabase.table('ambassadors').select(
+                'discord_id', 'username', 'current_month_points', 'total_points', 
+                'consecutive_months', 'reward_tier', 'status'
+            ).eq('status', 'active').order('current_month_points', desc=True).execute()
+            
+            ambassadors = result.data
             
             if not ambassadors:
                 await ctx.send("📊 No active ambassadors found.")
@@ -6546,7 +6547,13 @@ async def ambassadors_report(ctx, action=None):
             )
             
             leaderboard = ""
-            for i, (discord_id, username, month_points, total_points, consecutive, tier, status) in enumerate(ambassadors[:10]):
+            for i, ambassador in enumerate(ambassadors[:10]):
+                discord_id = ambassador['discord_id']
+                username = ambassador['username']
+                month_points = ambassador['current_month_points']
+                total_points = ambassador['total_points']
+                consecutive = ambassador['consecutive_months']
+                tier = ambassador['reward_tier']
                 status_emoji = "✅" if month_points >= 75 else "⚠️"
                 tier_emoji = "👑" if tier != "none" else ""
                 leaderboard += f"{i+1}. {status_emoji} **{username}** {tier_emoji}\n"
@@ -6555,7 +6562,7 @@ async def ambassadors_report(ctx, action=None):
             embed.add_field(name="🏆 Top Performers", value=leaderboard or "No data", inline=False)
             
             # Summary stats
-            compliant = sum(1 for a in ambassadors if a[2] >= 75)
+            compliant = sum(1 for a in ambassadors if a['current_month_points'] >= 75)
             behind = len(ambassadors) - compliant
             
             embed.add_field(name="📈 Summary", value=f"✅ On track: {compliant}\n⚠️ Behind pace: {behind}", inline=True)
