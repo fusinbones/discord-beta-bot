@@ -1954,7 +1954,13 @@ class BetaTestingBot(commands.Bot):
         ) if self.sheets_config.SPREADSHEET_ID else None
 
         # === AMBASSADOR PROGRAM ===
-        self.ambassador_program = AmbassadorProgram(self)
+        try:
+            self.ambassador_program = AmbassadorProgram(self)
+            print("✅ Ambassador Program initialized successfully")
+        except Exception as e:
+            print(f"❌ Ambassador Program initialization failed: {e}")
+            print("⚠️ Ambassador role sync will not work")
+            self.ambassador_program = None
         
         # === JIM THE MENTOR - Natural Conversation System ===
         self.natural_conversation_system = NaturalConversationSystem(self)
@@ -2085,8 +2091,12 @@ class BetaTestingBot(commands.Bot):
 
     async def sync_ambassadors_from_roles(self):
         """Automatically sync ambassadors based on Discord @Ambassador role"""
-        if not hasattr(self, 'ambassador_program') or not self.ambassador_program.supabase:
+        if not hasattr(self, 'ambassador_program') or not self.ambassador_program or not self.ambassador_program.supabase:
             print("⚠️ Ambassador program not available - skipping role sync")
+            print(f"   ambassador_program exists: {hasattr(self, 'ambassador_program')}")
+            print(f"   ambassador_program is not None: {getattr(self, 'ambassador_program', None) is not None}")
+            if hasattr(self, 'ambassador_program') and self.ambassador_program:
+                print(f"   supabase client exists: {hasattr(self.ambassador_program, 'supabase')}")
             return
         
         print("🔄 Syncing ambassadors from Discord roles...")
