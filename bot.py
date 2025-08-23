@@ -2887,6 +2887,9 @@ class BetaTestingBot(commands.Bot):
                                                 platform = self.detect_platform_from_url(url)
                                                 post_type = self.detect_post_type_from_url(url)
                                                 
+                                                # Calculate points based on platform and post type
+                                                points = self.calculate_submission_points(platform, post_type)
+                                                
                                                 # Add to submissions table
                                                 submission_data = {
                                                     'ambassador_id': ambassador_id,
@@ -2896,14 +2899,19 @@ class BetaTestingBot(commands.Bot):
                                                     'screenshot_hash': content_hash,
                                                     'content_preview': message.content[:200],
                                                     'timestamp': message.created_at.isoformat(),
-                                                    'points_awarded': 0,
+                                                    'points_awarded': points,
                                                     'is_duplicate': False,
-                                                    'validity_status': 'pending'
+                                                    'validity_status': 'accepted'
                                                 }
                                                 
                                                 try:
+                                                    # Insert submission
                                                     self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
-                                                    print(f"   ✅ Added URL submission: {username} - {platform} - {url[:50]}...")
+                                                    
+                                                    # Update ambassador points
+                                                    await self.update_ambassador_points(ambassador_id, points)
+                                                    
+                                                    print(f"   ✅ Added URL submission: {username} - {platform} - {url[:50]}... (+{points} pts)")
                                                     processed_submissions += 1
                                                 except Exception as insert_error:
                                                     print(f"   ❌ Failed to insert URL submission: {insert_error}")
@@ -2922,6 +2930,9 @@ class BetaTestingBot(commands.Bot):
                                                 existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
                                                 
                                                 if not existing.data:
+                                                    # Calculate points for screenshot
+                                                    points = self.calculate_submission_points('screenshot', 'screenshot')
+                                                    
                                                     # Add screenshot submission
                                                     submission_data = {
                                                         'ambassador_id': ambassador_id,
@@ -2931,14 +2942,19 @@ class BetaTestingBot(commands.Bot):
                                                         'screenshot_hash': content_hash,
                                                         'content_preview': message.content[:200],
                                                         'timestamp': message.created_at.isoformat(),
-                                                        'points_awarded': 0,
+                                                        'points_awarded': points,
                                                         'is_duplicate': False,
-                                                        'validity_status': 'pending'
+                                                        'validity_status': 'accepted'
                                                     }
                                                     
                                                     try:
+                                                        # Insert submission
                                                         self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
-                                                        print(f"   ✅ Added screenshot: {username} - {attachment.filename}")
+                                                        
+                                                        # Update ambassador points
+                                                        await self.update_ambassador_points(ambassador_id, points)
+                                                        
+                                                        print(f"   ✅ Added screenshot: {username} - {attachment.filename} (+{points} pts)")
                                                         processed_submissions += 1
                                                     except Exception as insert_error:
                                                         print(f"   ❌ Failed to insert screenshot: {insert_error}")
@@ -3002,6 +3018,48 @@ class BetaTestingBot(commands.Bot):
             return 'answer'
         else:
             return 'post'
+    
+    def calculate_submission_points(self, platform, post_type):
+        """Calculate points for a submission based on platform and post type"""
+        platform = platform.lower()
+        post_type = post_type.lower()
+        
+        if platform in ['youtube', 'tiktok'] and 'video' in post_type:
+            return 15
+        elif platform == 'instagram' and 'reel' in post_type:
+            return 10
+        elif platform == 'instagram' and 'post' in post_type:
+            return 10
+        elif platform == 'facebook':
+            return 10
+        elif platform in ['twitter', 'x']:
+            return 8
+        elif platform in ['reddit', 'quora']:
+            return 12
+        elif platform == 'screenshot':
+            return 5
+        else:
+            return 5
+    
+    async def update_ambassador_points(self, ambassador_id, points_to_add):
+        """Update ambassador's current month and total points"""
+        try:
+            # Get current ambassador data
+            result = self.ambassador_program.supabase.table('ambassadors').select('current_month_points', 'total_points').eq('discord_id', ambassador_id).execute()
+            
+            if result.data:
+                current_data = result.data[0]
+                new_month_points = current_data.get('current_month_points', 0) + points_to_add
+                new_total_points = current_data.get('total_points', 0) + points_to_add
+                
+                # Update in database
+                self.ambassador_program.supabase.table('ambassadors').update({
+                    'current_month_points': new_month_points,
+                    'total_points': new_total_points
+                }).eq('discord_id', ambassador_id).execute()
+                
+        except Exception as e:
+            print(f"❌ Error updating points for ambassador {ambassador_id}: {e}")
     
     @tasks.loop(hours=12)  # Check twice daily
     async def staff_notification_task(self):
@@ -6652,6 +6710,55 @@ async def ambassadors_report(ctx, action=None):
                 await ctx.send("📊 No active ambassadors found.")
                 return
             
+            # Calculate points from submissions for each ambassador
+            from datetime import datetime, timedelta
+            current_month = datetime.now().strftime('%Y-%m')
+            
+            for ambassador in ambassadors:
+                discord_id = ambassador['discord_id']
+                
+                # Get submissions for this month
+                submissions_result = bot.ambassador_program.supabase.table('submissions').select('*').eq('ambassador_id', discord_id).execute()
+                
+                # Calculate points from submissions
+                month_points = 0
+                total_submissions = len(submissions_result.data)
+                
+                for submission in submissions_result.data:
+                    # Award points based on platform and post type
+                    platform = submission.get('platform', '').lower()
+                    post_type = submission.get('post_type', '').lower()
+                    
+                    if platform in ['youtube', 'tiktok'] and 'video' in post_type:
+                        month_points += 15
+                    elif platform in ['instagram'] and 'reel' in post_type:
+                        month_points += 10
+                    elif platform in ['instagram'] and 'post' in post_type:
+                        month_points += 10
+                    elif platform in ['facebook']:
+                        month_points += 10
+                    elif platform in ['twitter', 'x']:
+                        month_points += 8
+                    elif platform in ['reddit', 'quora']:
+                        month_points += 12
+                    elif platform == 'screenshot':
+                        month_points += 5
+                    else:
+                        month_points += 5
+                
+                # Update ambassador points in database
+                bot.ambassador_program.supabase.table('ambassadors').update({
+                    'current_month_points': month_points,
+                    'total_points': ambassador.get('total_points', 0) + month_points
+                }).eq('discord_id', discord_id).execute()
+                
+                # Update local data
+                ambassador['current_month_points'] = month_points
+                ambassador['submission_count'] = total_submissions
+            
+            # Sort by current month points
+            ambassadors.sort(key=lambda x: x['current_month_points'], reverse=True)
+            
             embed = discord.Embed(
                 title="📊 Ambassador Program Leaderboard",
                 description=f"Current month performance ({len(ambassadors)} active ambassadors)",
@@ -6666,18 +6773,21 @@ async def ambassadors_report(ctx, action=None):
                 total_points = ambassador['total_points']
                 consecutive = ambassador['consecutive_months']
                 tier = ambassador['reward_tier']
+                submission_count = ambassador.get('submission_count', 0)
+                
                 status_emoji = "✅" if month_points >= 75 else "⚠️"
                 tier_emoji = "👑" if tier != "none" else ""
                 leaderboard += f"{i+1}. {status_emoji} **{username}** {tier_emoji}\n"
-                leaderboard += f"   This month: {month_points} pts | Total: {total_points} pts | Streak: {consecutive}mo\n\n"
+                leaderboard += f"   This month: {month_points} pts ({submission_count} posts) | Total: {total_points} pts | Streak: {consecutive}mo\n\n"
             
             embed.add_field(name="🏆 Top Performers", value=leaderboard or "No data", inline=False)
             
             # Summary stats
             compliant = sum(1 for a in ambassadors if a['current_month_points'] >= 75)
             behind = len(ambassadors) - compliant
+            total_submissions = sum(a.get('submission_count', 0) for a in ambassadors)
             
-            embed.add_field(name="📈 Summary", value=f"✅ On track: {compliant}\n⚠️ Behind pace: {behind}", inline=True)
+            embed.add_field(name="📈 Summary", value=f"✅ On track: {compliant}\n⚠️ Behind pace: {behind}\n📊 Total posts: {total_submissions}", inline=True)
             
             await ctx.send(embed=embed)
             
@@ -6744,8 +6854,59 @@ async def ambassadors_report(ctx, action=None):
         except Exception as e:
             await ctx.send(f"❌ Error checking submissions: {e}")
     
+    elif action == "update-points":
+        # Update points for existing submissions
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to update points.")
+            return
+        
+        await ctx.send("🔄 Updating points for existing submissions...")
+        
+        try:
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            # Get all submissions with 0 points or pending status
+            result = bot.ambassador_program.supabase.table('submissions').select('*').execute()
+            submissions = result.data
+            
+            updated_count = 0
+            total_points_awarded = 0
+            
+            for submission in submissions:
+                submission_id = submission.get('id')
+                platform = submission.get('platform', '')
+                post_type = submission.get('post_type', '')
+                current_points = submission.get('points_awarded', 0)
+                ambassador_id = submission.get('ambassador_id')
+                
+                # Calculate correct points
+                correct_points = bot.calculate_submission_points(platform, post_type)
+                
+                # Update if points are different
+                if current_points != correct_points:
+                    # Update submission points
+                    bot.ambassador_program.supabase.table('submissions').update({
+                        'points_awarded': correct_points,
+                        'validity_status': 'accepted'
+                    }).eq('id', submission_id).execute()
+                    
+                    # Add points difference to ambassador
+                    points_difference = correct_points - current_points
+                    if points_difference != 0:
+                        await bot.update_ambassador_points(ambassador_id, points_difference)
+                        total_points_awarded += points_difference
+                    
+                    updated_count += 1
+            
+            await ctx.send(f"✅ Updated {updated_count} submissions, awarded {total_points_awarded} total points")
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error updating points: {e}")
+    
     else:
-        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, or `!ambassadors submissions` to view recent submissions.")
+        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, `!ambassadors submissions` to view recent submissions, or `!ambassadors update-points` to award points for existing submissions.")
 
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
