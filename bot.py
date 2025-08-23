@@ -1996,9 +1996,10 @@ class BetaTestingBot(commands.Bot):
         # Scan recent history silently (no announcements)
         await self.scan_recent_history_silent()
         
-        # Schedule the recurring tasks
-        self.schedule_update_task.start()
+        # Start background tasks
+        self.ambassador_role_sync_task.start()
         self.ambassador_chat_sync_task.start()
+        self.ambassador_sheets_sync_task.start()
         self.staff_notification_task.start()
 
     async def on_member_update(self, before, after):
@@ -3060,6 +3061,36 @@ class BetaTestingBot(commands.Bot):
                 
         except Exception as e:
             print(f"❌ Error updating points for ambassador {ambassador_id}: {e}")
+    
+    @tasks.loop(hours=6)  # Sync every 6 hours
+    async def ambassador_sheets_sync_task(self):
+        """Automatically sync ambassador data with Google Sheets"""
+        try:
+            if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
+                return
+            
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID')
+            if not spreadsheet_id:
+                return  # Skip if not configured
+            
+            from ambassador_sheets_integration import AmbassadorSheetsManager
+            
+            sheets_manager = AmbassadorSheetsManager(
+                spreadsheet_id=spreadsheet_id,
+                credentials_path='config/google_service_account.json',
+                supabase_client=self.ambassador_program.supabase
+            )
+            
+            # Sync to sheet
+            await sheets_manager.sync_ambassadors_to_sheet()
+            
+            # Check for manual adjustments from sheet
+            await sheets_manager.sync_from_sheet_to_supabase()
+            
+            print("✅ Automated ambassador sheets sync completed")
+            
+        except Exception as e:
+            print(f"❌ Error in automated sheets sync: {e}")
     
     @tasks.loop(hours=12)  # Check twice daily
     async def staff_notification_task(self):
@@ -6854,6 +6885,74 @@ async def ambassadors_report(ctx, action=None):
         except Exception as e:
             await ctx.send(f"❌ Error checking submissions: {e}")
     
+    elif action == "audit":
+        # Audit points for accuracy and duplicates
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to run audit.")
+            return
+        
+        await ctx.send("🔍 Auditing ambassador points for accuracy...")
+        
+        try:
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            # Get all ambassadors and their submissions
+            ambassadors_result = bot.ambassador_program.supabase.table('ambassadors').select('*').eq('status', 'active').execute()
+            
+            audit_report = "📊 **Ambassador Points Audit Report**\n\n"
+            total_discrepancies = 0
+            
+            for ambassador in ambassadors_result.data:
+                discord_id = ambassador['discord_id']
+                username = ambassador['username']
+                stored_points = ambassador.get('current_month_points', 0)
+                
+                # Get all submissions for this ambassador
+                submissions_result = bot.ambassador_program.supabase.table('submissions').select('*').eq('ambassador_id', discord_id).execute()
+                submissions = submissions_result.data
+                
+                # Calculate actual points from submissions
+                calculated_points = sum(sub.get('points_awarded', 0) for sub in submissions)
+                
+                # Check for duplicates by URL/screenshot hash
+                unique_hashes = set()
+                duplicate_count = 0
+                
+                for sub in submissions:
+                    hash_key = sub.get('screenshot_hash', '')
+                    if hash_key in unique_hashes:
+                        duplicate_count += 1
+                    else:
+                        unique_hashes.add(hash_key)
+                
+                # Report discrepancies
+                if stored_points != calculated_points or duplicate_count > 0:
+                    audit_report += f"⚠️ **{username}**\n"
+                    audit_report += f"   Stored: {stored_points} pts | Calculated: {calculated_points} pts\n"
+                    audit_report += f"   Submissions: {len(submissions)} | Duplicates: {duplicate_count}\n"
+                    if duplicate_count > 0:
+                        audit_report += f"   🚨 Potential duplicates detected!\n"
+                    audit_report += "\n"
+                    total_discrepancies += 1
+            
+            if total_discrepancies == 0:
+                audit_report += "✅ All ambassador points are accurate!"
+            else:
+                audit_report += f"Found {total_discrepancies} ambassadors with discrepancies."
+            
+            # Send audit report (split if too long)
+            if len(audit_report) > 2000:
+                chunks = [audit_report[i:i+2000] for i in range(0, len(audit_report), 2000)]
+                for chunk in chunks:
+                    await ctx.send(chunk)
+            else:
+                await ctx.send(audit_report)
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error during audit: {e}")
+    
     elif action == "update-points":
         # Update points for existing submissions
         if not has_staff_role(ctx.author, ctx.guild):
@@ -6905,8 +7004,80 @@ async def ambassadors_report(ctx, action=None):
         except Exception as e:
             await ctx.send(f"❌ Error updating points: {e}")
     
+    elif action == "sheets-sync":
+        # Sync with Google Sheets
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to sync sheets.")
+            return
+        
+        await ctx.send("📊 Syncing ambassador data with Google Sheets...")
+        
+        try:
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            # Check for Google Sheets configuration
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID')
+            credentials_path = 'config/google_service_account.json'
+            
+            if not spreadsheet_id:
+                setup_info = """
+🔧 **Google Sheets Setup Required:**
+
+1. Create a new Google Sheet for ambassador tracking
+2. Set environment variable: `AMBASSADOR_SPREADSHEET_ID=your_sheet_id`
+3. Place service account credentials at: `config/google_service_account.json`
+
+**Sheet Structure:**
+- A: Discord ID | B: Username | C: Current Month Points
+- D: Total Points | E: Submissions Count | F: Last Updated  
+- G: Status | H: Manual Adjustments | I: Notes
+
+**Manual Adjustments:** Staff can add/subtract points in column H
+**Notes:** Add comments about adjustments in column I
+                """
+                await ctx.send(setup_info)
+                return
+            
+            # Import and use the ambassador sheets manager
+            try:
+                from ambassador_sheets_integration import AmbassadorSheetsManager
+                
+                sheets_manager = AmbassadorSheetsManager(
+                    spreadsheet_id=spreadsheet_id,
+                    credentials_path=credentials_path,
+                    supabase_client=bot.ambassador_program.supabase
+                )
+                
+                # Create sheet if needed
+                await sheets_manager.create_ambassador_sheet()
+                
+                # Sync ambassadors to sheet
+                success = await sheets_manager.sync_ambassadors_to_sheet()
+                
+                if success:
+                    await ctx.send("✅ Successfully synced ambassador data to Google Sheets!")
+                    
+                    # Also sync any manual adjustments back
+                    await sheets_manager.sync_from_sheet_to_supabase()
+                    await ctx.send("🔄 Checked for manual adjustments from sheet")
+                    
+                    sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+                    await ctx.send(f"📊 **Ambassador Tracking Sheet:** {sheet_url}")
+                else:
+                    await ctx.send("❌ Failed to sync to Google Sheets. Check credentials and permissions.")
+                
+            except ImportError:
+                await ctx.send("❌ Google Sheets integration not available. Missing dependencies.")
+            except Exception as sheets_error:
+                await ctx.send(f"❌ Sheets sync error: {sheets_error}")
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error syncing sheets: {e}")
+    
     else:
-        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, `!ambassadors submissions` to view recent submissions, or `!ambassadors update-points` to award points for existing submissions.")
+        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, `!ambassadors submissions` to view recent submissions, `!ambassadors audit` to check for duplicates, `!ambassadors update-points` to award points, or `!ambassadors sheets-sync` for Google Sheets integration.")
 
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
