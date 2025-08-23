@@ -2826,12 +2826,19 @@ class BetaTestingBot(commands.Bot):
             # Find ambassador channels
             ambassador_channels = []
             for guild in self.guilds:
+                print(f"🔍 Scanning guild: {guild.name}")
                 for channel in guild.text_channels:
-                    if any(keyword in channel.name.lower() for keyword in ['ambassador', 'content-creator', 'influencer']):
+                    channel_name = channel.name.lower()
+                    if any(keyword in channel_name for keyword in ['ambassador', 'content-creator', 'influencer']):
                         ambassador_channels.append(channel)
+                        print(f"   ✅ Found ambassador channel: #{channel.name}")
             
+            print(f"📋 Total ambassador channels found: {len(ambassador_channels)}")
             if not ambassador_channels:
-                print("⚠️ No ambassador channels found")
+                print("⚠️ No ambassador channels found - checking all channels for debugging:")
+                for guild in self.guilds:
+                    for channel in guild.text_channels:
+                        print(f"   - #{channel.name}")
                 return
             
             # Scan ALL messages in ambassador channels (full history)
@@ -2862,6 +2869,7 @@ class BetaTestingBot(commands.Bot):
                                 if result.data:
                                     ambassador = result.data[0]
                                     ambassador_id = ambassador['discord_id']
+                                    username = ambassador['username']
                                     
                                     # Process URLs
                                     if has_url:
@@ -2893,8 +2901,14 @@ class BetaTestingBot(commands.Bot):
                                                     'validity_status': 'pending'
                                                 }
                                                 
-                                                self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
-                                                processed_submissions += 1
+                                                try:
+                                                    self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
+                                                    print(f"   ✅ Added URL submission: {username} - {platform} - {url[:50]}...")
+                                                    processed_submissions += 1
+                                                except Exception as insert_error:
+                                                    print(f"   ❌ Failed to insert URL submission: {insert_error}")
+                                            else:
+                                                print(f"   ⚠️ Duplicate URL skipped: {username} - {url[:50]}...")
                                     
                                     # Process attachments (screenshots)
                                     if has_attachment:
@@ -2922,8 +2936,14 @@ class BetaTestingBot(commands.Bot):
                                                         'validity_status': 'pending'
                                                     }
                                                     
-                                                    self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
-                                                    processed_submissions += 1
+                                                    try:
+                                                        self.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
+                                                        print(f"   ✅ Added screenshot: {username} - {attachment.filename}")
+                                                        processed_submissions += 1
+                                                    except Exception as insert_error:
+                                                        print(f"   ❌ Failed to insert screenshot: {insert_error}")
+                                                else:
+                                                    print(f"   ⚠️ Duplicate screenshot skipped: {username} - {attachment.filename}")
                                                     
                             except Exception as e:
                                 print(f"❌ Error processing message from {message.author.name}: {e}")
@@ -6678,8 +6698,54 @@ async def ambassadors_report(ctx, action=None):
         except Exception as e:
             await ctx.send(f"❌ Error during sync: {e}")
     
+    elif action == "submissions":
+        # Check submissions table
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to view submissions.")
+            return
+        
+        try:
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            result = bot.ambassador_program.supabase.table('submissions').select('*').order('timestamp', desc=True).limit(10).execute()
+            submissions = result.data
+            
+            if not submissions:
+                await ctx.send("📊 No submissions found in database.")
+                return
+            
+            embed = discord.Embed(
+                title="📋 Recent Ambassador Submissions",
+                description=f"Last {len(submissions)} submissions",
+                color=0x00ff00
+            )
+            
+            for i, sub in enumerate(submissions):
+                ambassador_id = sub.get('ambassador_id', 'Unknown')
+                platform = sub.get('platform', 'Unknown')
+                url = sub.get('url', 'No URL')
+                points = sub.get('points_awarded', 0)
+                status = sub.get('validity_status', 'pending')
+                
+                # Get ambassador username
+                amb_result = bot.ambassador_program.supabase.table('ambassadors').select('username').eq('discord_id', ambassador_id).execute()
+                username = amb_result.data[0]['username'] if amb_result.data else 'Unknown'
+                
+                embed.add_field(
+                    name=f"{i+1}. {username} - {platform}",
+                    value=f"URL: {url[:50]}...\nPoints: {points} | Status: {status}",
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error checking submissions: {e}")
+    
     else:
-        await ctx.send("Use `!ambassadors report` to see the current leaderboard or `!ambassadors sync` to manually sync submissions.")
+        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, or `!ambassadors submissions` to view recent submissions.")
 
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
