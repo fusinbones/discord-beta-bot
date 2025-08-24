@@ -3069,7 +3069,7 @@ class BetaTestingBot(commands.Bot):
             if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
                 return
             
-            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID')
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
             if not spreadsheet_id:
                 return  # Skip if not configured
             
@@ -3081,11 +3081,11 @@ class BetaTestingBot(commands.Bot):
                 supabase_client=self.ambassador_program.supabase
             )
             
-            # Sync to sheet
-            await sheets_manager.sync_ambassadors_to_sheet()
+            # Full backup to sheets
+            await sheets_manager.full_backup_to_sheets()
             
-            # Check for manual adjustments from sheet
-            await sheets_manager.sync_from_sheet_to_supabase()
+            # Check for manual changes from sheets
+            await sheets_manager.sync_from_sheets_to_supabase()
             
             print("✅ Automated ambassador sheets sync completed")
             
@@ -7017,8 +7017,8 @@ async def ambassadors_report(ctx, action=None):
                 await ctx.send("❌ Ambassador program not available.")
                 return
             
-            # Check for Google Sheets configuration
-            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID')
+            # Check for Google Sheets configuration - use the provided ambassador sheet
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
             credentials_path = 'config/google_service_account.json'
             
             if not spreadsheet_id:
@@ -7050,23 +7050,21 @@ async def ambassadors_report(ctx, action=None):
                     supabase_client=bot.ambassador_program.supabase
                 )
                 
-                # Create sheet if needed
-                await sheets_manager.create_ambassador_sheet()
-                
-                # Sync ambassadors to sheet
-                success = await sheets_manager.sync_ambassadors_to_sheet()
+                # Full backup - create both sheets and sync all data
+                success = await sheets_manager.full_backup_to_sheets()
                 
                 if success:
-                    await ctx.send("✅ Successfully synced ambassador data to Google Sheets!")
+                    await ctx.send("✅ **Complete backup to Google Sheets successful!**")
                     
-                    # Also sync any manual adjustments back
-                    await sheets_manager.sync_from_sheet_to_supabase()
-                    await ctx.send("🔄 Checked for manual adjustments from sheet")
+                    # Also sync any manual changes back from sheets
+                    await sheets_manager.sync_from_sheets_to_supabase()
+                    await ctx.send("🔄 Synced any manual changes from sheets back to database")
                     
-                    sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-                    await ctx.send(f"📊 **Ambassador Tracking Sheet:** {sheet_url}")
+                    sheet_url = "https://docs.google.com/spreadsheets/d/1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA"
+                    await ctx.send(f"📊 **Ambassador Control Sheet:** {sheet_url}")
+                    await ctx.send("📋 **Using your existing Sidekick Tools Ambassador Program sheet**\n• **Ambassadors** tab - Control ambassador data and points\n• **Submissions** tab - View and manage all submissions")
                 else:
-                    await ctx.send("❌ Failed to sync to Google Sheets. Check credentials and permissions.")
+                    await ctx.send("❌ Failed to backup to Google Sheets. Check credentials and permissions.")
                 
             except ImportError:
                 await ctx.send("❌ Google Sheets integration not available. Missing dependencies.")
