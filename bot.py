@@ -2932,21 +2932,60 @@ class BetaTestingBot(commands.Bot):
                                                 existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
                                                 
                                                 if not existing.data:
-                                                    # Calculate points for screenshot
-                                                    points = self.calculate_submission_points('screenshot', 'screenshot')
+                                                    # Analyze screenshot with AI to identify platform and post type
+                                                    try:
+                                                        # Download image and convert to base64 for AI analysis
+                                                        import aiohttp
+                                                        import base64
+                                                        
+                                                        async with aiohttp.ClientSession() as session:
+                                                            async with session.get(attachment.url) as resp:
+                                                                if resp.status == 200:
+                                                                    image_data = await resp.read()
+                                                                    base64_image = base64.b64encode(image_data).decode('utf-8')
+                                                                    
+                                                                    # Analyze with AI
+                                                                    analysis = await self.analyze_ambassador_screenshot(base64_image)
+                                                                    
+                                                                    # Use AI analysis results
+                                                                    platform = analysis.get('platform', 'screenshot')
+                                                                    post_type = analysis.get('post_type', 'screenshot')
+                                                                    confidence = analysis.get('confidence', 0.0)
+                                                                    appears_legitimate = analysis.get('appears_legitimate', False)
+                                                                    
+                                                                    # Only award points if AI is confident and post appears legitimate
+                                                                    if confidence > 0.7 and appears_legitimate:
+                                                                        points = self.calculate_submission_points(platform, post_type)
+                                                                    else:
+                                                                        points = 0  # Flag for manual review
+                                                                    
+                                                                    print(f"   🤖 AI Analysis: {platform} {post_type} (confidence: {confidence:.2f}, legitimate: {appears_legitimate}) - {points} pts")
+                                                                else:
+                                                                    # Fallback if image can't be downloaded
+                                                                    platform = 'screenshot'
+                                                                    post_type = 'screenshot'
+                                                                    points = 0
+                                                                    print(f"   ⚠️ Could not download image for analysis")
+                                                    
+                                                    except Exception as analysis_error:
+                                                        print(f"   ❌ AI analysis failed: {analysis_error}")
+                                                        # Fallback to basic screenshot detection
+                                                        platform = 'screenshot'
+                                                        post_type = 'screenshot'
+                                                        points = 0  # Require manual review
                                                     
                                                     # Add screenshot submission
                                                     submission_data = {
                                                         'ambassador_id': ambassador_id,
-                                                        'platform': 'screenshot',
-                                                        'post_type': 'screenshot',
+                                                        'platform': platform,
+                                                        'post_type': post_type,
                                                         'url': attachment.url,
                                                         'screenshot_hash': content_hash,
                                                         'content_preview': message.content[:200],
                                                         'timestamp': message.created_at.isoformat(),
                                                         'points_awarded': points,
                                                         'is_duplicate': False,
-                                                        'validity_status': 'accepted'
+                                                        'validity_status': 'pending' if points == 0 else 'accepted'
                                                     }
                                                     
                                                     try:
@@ -3885,54 +3924,50 @@ Keep it technical but accessible.
             
             try:
                 response = await claude_client.messages.create(
-                    model="claude-3-sonnet-20240229",
+                    model="claude-3-haiku-20240307",
                     max_tokens=200,
                     messages=[
                         {
                             "role": "user",
                             "content": [
                                 {
-                                    "type": "text",
-                                    "text": prompt
-                                },
-                                {
                                     "type": "image",
                                     "source": {
-                                        "type": "url",
-                                        "url": screenshot_url
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": screenshot_url  # This should be base64 encoded image data
                                     }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": prompt
                                 }
                             ]
                         }
                     ]
                 )
-                return response.content[0].text.strip()
+                return response.content[0].text
             except Exception as claude_error:
                 print(f"Claude analysis failed: {claude_error}")
         
-        # Fallback to OpenAI if Claude fails or isn't available
+        # Fallback to OpenAI if Claude fails
         if openai_client:
             try:
                 response = await openai_client.chat.completions.create(
                     model="gpt-4-vision-preview",
+                    max_tokens=200,
                     messages=[
                         {
                             "role": "user",
                             "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Analyze this screenshot for a bug report. User says: '{bug_description}'. Provide a brief technical analysis (2-3 sentences)."
-                                },
+                                {"type": "text", "text": prompt},
                                 {
                                     "type": "image_url",
-                                    "image_url": {
-                                        "url": screenshot_url
-                                    }
+                                    "image_url": {"url": screenshot_url}
                                 }
                             ]
                         }
-                    ],
-                    max_tokens=200
+                    ]
                 )
                 return response.choices[0].message.content.strip()
             except Exception as openai_error:
@@ -3945,10 +3980,116 @@ Keep it technical but accessible.
         print(f"Screenshot analysis error: {e}")
         return "Screenshot analysis failed, but image has been preserved for manual review."
 
+async def analyze_ambassador_screenshot(self, screenshot_url: str) -> dict:
+    """Analyze ambassador screenshot to identify platform and post type"""
+    try:
+        if claude_client:
+            prompt = """
+Analyze this screenshot to identify social media platform and post type for ambassador tracking.
+
+Look for:
+1. Platform indicators (Instagram, TikTok, Facebook, YouTube, Twitter, etc.)
+2. Post type (regular post, story, reel, video, etc.)
+3. Any visible engagement metrics
+4. Whether this appears to be a legitimate social media post
+
+Respond in JSON format:
+{
+    "platform": "instagram|tiktok|facebook|youtube|twitter|other",
+    "post_type": "post|story|reel|video|comment|other",
+    "confidence": 0.0-1.0,
+    "engagement_visible": true/false,
+    "appears_legitimate": true/false,
+    "reasoning": "brief explanation"
+}
+"""
+            
+            try:
+                response = await claude_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=300,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": screenshot_url
+                                    }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": prompt
+                                }
+                            ]
+                        }
+                    ]
+                )
+                
+                # Parse JSON response
+                import json
+                analysis = json.loads(response.content[0].text)
+                return analysis
+                
+            except Exception as claude_error:
+                print(f"Claude ambassador analysis failed: {claude_error}")
+        
+        # Fallback to OpenAI
+        if openai_client:
+            try:
+                response = await openai_client.chat.completions.create(
+                    model="gpt-4-vision-preview",
+                    max_tokens=300,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": screenshot_url}
+                                }
+                            ]
+                        }
+                    ]
+                )
+                
+                import json
+                analysis = json.loads(response.choices[0].message.content.strip())
+                return analysis
+                
+            except Exception as openai_error:
+                print(f"OpenAI ambassador analysis failed: {openai_error}")
+        
+        # Default fallback
+        return {
+            "platform": "other",
+            "post_type": "screenshot",
+            "confidence": 0.0,
+            "engagement_visible": False,
+            "appears_legitimate": False,
+            "reasoning": "AI analysis unavailable"
+        }
+        
+    except Exception as e:
+        print(f"Ambassador screenshot analysis error: {e}")
+        return {
+            "platform": "other",
+            "post_type": "screenshot", 
+            "confidence": 0.0,
+            "engagement_visible": False,
+            "appears_legitimate": False,
+            "reasoning": f"Analysis failed: {e}"
+        }
+
 # === CREATE BOT INSTANCE ===
 bot = BetaTestingBot()
 
 # Bug reporting command
+{{ ... }}
 @bot.command(name='bug')
 async def report_bug(ctx, *, description=None):
     """Report a bug and notify staff (supports screenshots)"""
