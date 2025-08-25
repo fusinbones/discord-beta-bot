@@ -1999,6 +1999,7 @@ class BetaTestingBot(commands.Bot):
         # Start background tasks
         self.ambassador_role_sync_task.start()
         self.ambassador_chat_sync_task.start()
+        self.ambassador_points_audit_task.start()
         self.ambassador_sheets_sync_task.start()
         self.staff_notification_task.start()
 
@@ -3062,12 +3063,73 @@ class BetaTestingBot(commands.Bot):
         except Exception as e:
             print(f"❌ Error updating points for ambassador {ambassador_id}: {e}")
     
+    async def audit_and_fix_ambassador_points(self):
+        """Audit and automatically fix ambassador point calculation errors"""
+        try:
+            if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
+                return
+            
+            print("🔍 Running automatic ambassador points audit...")
+            
+            # Get all ambassadors
+            result = self.ambassador_program.supabase.table('ambassadors').select('*').execute()
+            ambassadors = result.data
+            
+            fixed_count = 0
+            total_discrepancies = 0
+            
+            for ambassador in ambassadors:
+                discord_id = ambassador['discord_id']
+                username = ambassador['username']
+                stored_points = ambassador.get('current_month_points', 0)
+                
+                # Get all submissions and calculate correct points
+                submissions_result = self.ambassador_program.supabase.table('submissions').select('*').eq('ambassador_id', discord_id).execute()
+                submissions = submissions_result.data
+                
+                # Calculate actual points from submissions
+                calculated_points = sum(sub.get('points_awarded', 0) for sub in submissions)
+                
+                # Check for discrepancies
+                if stored_points != calculated_points:
+                    total_discrepancies += 1
+                    discrepancy = stored_points - calculated_points
+                    
+                    print(f"🔧 Fixing {username}: {stored_points} → {calculated_points} pts (diff: {discrepancy})")
+                    
+                    # Update with correct points
+                    self.ambassador_program.supabase.table('ambassadors').update({
+                        'current_month_points': calculated_points,
+                        'total_points': calculated_points  # Assuming single month for now
+                    }).eq('discord_id', discord_id).execute()
+                    
+                    fixed_count += 1
+            
+            if fixed_count > 0:
+                print(f"✅ Auto-fixed {fixed_count} ambassadors with point calculation errors")
+            else:
+                print("✅ All ambassador points are accurate")
+                
+        except Exception as e:
+            print(f"❌ Error in automatic points audit: {e}")
+    
+    @tasks.loop(hours=2)  # Run every 2 hours
+    async def ambassador_points_audit_task(self):
+        """Automatically audit and fix ambassador points every 2 hours"""
+        try:
+            await self.audit_and_fix_ambassador_points()
+        except Exception as e:
+            print(f"❌ Error in automated points audit: {e}")
+    
     @tasks.loop(hours=6)  # Sync every 6 hours
     async def ambassador_sheets_sync_task(self):
         """Automatically sync ambassador data with Google Sheets"""
         try:
             if not hasattr(self, 'ambassador_program') or not self.ambassador_program:
                 return
+            
+            # Run points audit before syncing to sheets
+            await self.audit_and_fix_ambassador_points()
             
             spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
             if not spreadsheet_id:
@@ -6891,67 +6953,41 @@ async def ambassadors_report(ctx, action=None):
             await ctx.send("❌ You need the Staff role to run audit.")
             return
         
-        await ctx.send("🔍 Auditing ambassador points for accuracy...")
+        await ctx.send("🔍 Running manual audit and fixing any issues...")
         
         try:
             if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
                 await ctx.send("❌ Ambassador program not available.")
                 return
             
-            # Get all ambassadors and their submissions
-            ambassadors_result = bot.ambassador_program.supabase.table('ambassadors').select('*').eq('status', 'active').execute()
+            # Run the automatic audit and fix function
+            await bot.audit_and_fix_ambassador_points()
             
-            audit_report = "📊 **Ambassador Points Audit Report**\n\n"
-            total_discrepancies = 0
-            
-            for ambassador in ambassadors_result.data:
-                discord_id = ambassador['discord_id']
-                username = ambassador['username']
-                stored_points = ambassador.get('current_month_points', 0)
-                
-                # Get all submissions for this ambassador
-                submissions_result = bot.ambassador_program.supabase.table('submissions').select('*').eq('ambassador_id', discord_id).execute()
-                submissions = submissions_result.data
-                
-                # Calculate actual points from submissions
-                calculated_points = sum(sub.get('points_awarded', 0) for sub in submissions)
-                
-                # Check for duplicates by URL/screenshot hash
-                unique_hashes = set()
-                duplicate_count = 0
-                
-                for sub in submissions:
-                    hash_key = sub.get('screenshot_hash', '')
-                    if hash_key in unique_hashes:
-                        duplicate_count += 1
-                    else:
-                        unique_hashes.add(hash_key)
-                
-                # Report discrepancies
-                if stored_points != calculated_points or duplicate_count > 0:
-                    audit_report += f"⚠️ **{username}**\n"
-                    audit_report += f"   Stored: {stored_points} pts | Calculated: {calculated_points} pts\n"
-                    audit_report += f"   Submissions: {len(submissions)} | Duplicates: {duplicate_count}\n"
-                    if duplicate_count > 0:
-                        audit_report += f"   🚨 Potential duplicates detected!\n"
-                    audit_report += "\n"
-                    total_discrepancies += 1
-            
-            if total_discrepancies == 0:
-                audit_report += "✅ All ambassador points are accurate!"
-            else:
-                audit_report += f"Found {total_discrepancies} ambassadors with discrepancies."
-            
-            # Send audit report (split if too long)
-            if len(audit_report) > 2000:
-                chunks = [audit_report[i:i+2000] for i in range(0, len(audit_report), 2000)]
-                for chunk in chunks:
-                    await ctx.send(chunk)
-            else:
-                await ctx.send(audit_report)
+            await ctx.send("✅ Manual audit completed! Points have been automatically corrected.")
             
         except Exception as e:
             await ctx.send(f"❌ Error during audit: {e}")
+    
+    elif action == "fix-points":
+        # Manually trigger point fixing
+        if not has_staff_role(ctx.author, ctx.guild):
+            await ctx.send("❌ You need the Staff role to fix points.")
+            return
+        
+        await ctx.send("🔧 Manually fixing all ambassador points...")
+        
+        try:
+            if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program or not bot.ambassador_program.supabase:
+                await ctx.send("❌ Ambassador program not available.")
+                return
+            
+            # Run the automatic audit and fix function
+            await bot.audit_and_fix_ambassador_points()
+            
+            await ctx.send("✅ All ambassador points have been recalculated and corrected!")
+            
+        except Exception as e:
+            await ctx.send(f"❌ Error fixing points: {e}")
     
     elif action == "update-points":
         # Update points for existing submissions
@@ -7075,7 +7111,7 @@ async def ambassadors_report(ctx, action=None):
             await ctx.send(f"❌ Error syncing sheets: {e}")
     
     else:
-        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, `!ambassadors submissions` to view recent submissions, `!ambassadors audit` to check for duplicates, `!ambassadors update-points` to award points, or `!ambassadors sheets-sync` for Google Sheets integration.")
+        await ctx.send("Use `!ambassadors report` for leaderboard, `!ambassadors sync` to sync submissions, `!ambassadors submissions` to view recent submissions, `!ambassadors audit` to check and fix points, `!ambassadors fix-points` to recalculate all points, `!ambassadors update-points` to award points, or `!ambassadors sheets-sync` for Google Sheets integration.")
 
 @bot.command(name='ambassador-detail')
 async def ambassador_detail(ctx, user: discord.Member = None):
