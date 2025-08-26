@@ -4089,7 +4089,6 @@ Respond in JSON format:
 bot = BetaTestingBot()
 
 # Bug reporting command
-{{ ... }}
 @bot.command(name='bug')
 async def report_bug(ctx, *, description=None):
     """Report a bug and notify staff (supports screenshots)"""
