@@ -6285,7 +6285,7 @@ async def view_sheet(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(name='sync')
-@commands.has_permissions(administrator=True)
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
 async def sync_missed_bugs(ctx, hours: int = 24):
     """
     Smart sync to catch up on missed !bug commands and handle deleted messages
