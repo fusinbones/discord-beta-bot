@@ -4351,24 +4351,7 @@ async def report_bug(ctx, *, description=None):
         else:
             embed.set_footer(text="Bug saved locally. Google Sheets sync pending.")
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
         # Add reaction to show it was processed
         try:
@@ -4824,24 +4807,7 @@ async def search_chat_history(ctx, query: str, channel_id: str = None, days_back
                 value=result['content'][:100] + ("..." if len(result['content']) > 100 else ""),
                 inline=False
             )
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
     else:
         await ctx.send(f"No results found for '{query}'")
 
@@ -5816,24 +5782,7 @@ async def my_bugs(ctx):
             description="You haven't reported any bugs yet. Use `!bug <description>` to report issues!",
             color=0x0099ff
         )
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         return
     
     embed = discord.Embed(
@@ -5958,24 +5907,7 @@ async def report_bug(ctx, *, bug_description: str = None):
             value="`!report-bug The app crashes when I try to upload images`", 
             inline=False
         )
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         return
     
     try:
@@ -6094,24 +6026,7 @@ async def report_bug(ctx, *, bug_description: str = None):
         else:
             embed.set_footer(text="Bug saved locally. Google Sheets sync pending.")
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
         # Add reaction to show it was processed
         try:
@@ -6154,24 +6069,7 @@ async def ambassador_stats(ctx):
             embed.add_field(name="🏆 Top Ambassadors (This Month)", value=leaderboard, inline=False)
         
         embed.set_footer(text="Ambassador Statistics • Jim the Mentor")
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
     except Exception as e:
         await ctx.send(f"❌ Error getting ambassador statistics: {e}")
@@ -6203,24 +6101,7 @@ async def ambassador_review(ctx):
                     description="All submissions are currently approved!",
                     color=0x00ff00
                 )
-                # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+                await ctx.send(embed=embed)
                 return
             
             embed = discord.Embed(
@@ -6254,24 +6135,7 @@ async def ambassador_review(ctx):
                     inline=False
                 )
             
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
     except Exception as e:
         await ctx.send(f"❌ Error reviewing flagged submissions: {e}")
@@ -6340,24 +6204,7 @@ async def ambassador_approve(ctx, submission_id: int):
             embed.add_field(name="Points Awarded", value=str(points), inline=True)
             embed.add_field(name="Approved By", value=ctx.author.mention, inline=True)
             
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
     except Exception as e:
         await ctx.send(f"❌ Error approving submission: {e}")
@@ -6403,24 +6250,7 @@ async def ambassador_reject(ctx, submission_id: int, *, reason: str = "Does not 
             embed.add_field(name="Reason", value=reason, inline=True)
             embed.add_field(name="Rejected By", value=ctx.author.mention, inline=True)
             
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
     except Exception as e:
         await ctx.send(f"❌ Error rejecting submission: {e}")
@@ -6470,24 +6300,7 @@ async def ambassador_leaderboard(ctx):
             embed.add_field(name="🌟 All-Time Leaders", value=all_time_leaders, inline=False)
             
             embed.set_footer(text="Ambassador Leaderboard • Jim the Mentor")
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
     except Exception as e:
         await ctx.send(f"❌ Error getting leaderboard: {e}")
@@ -6654,24 +6467,7 @@ async def sync_missed_bugs(ctx, hours: int = 24):
         embed.add_field(name="📝 Bugs Synced", value=str(synced_bugs), inline=True)
         embed.add_field(name="📊 Status", value="✅ Complete", inline=True)
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         print(f"✅ Sync complete: {synced_bugs} bugs processed")
         
     except Exception as e:
@@ -6941,24 +6737,7 @@ async def ambassador_command(ctx, action=None, user=None):
             value="`!ambassador remove @user`",
             inline=False
         )
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
 
 # === AMBASSADOR-ONLY COMMANDS ===
 
@@ -7070,24 +6849,7 @@ async def ambassador_stats(ctx):
         else:
             embed.set_footer(text="🎉 Great job! You've hit your monthly target!")
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
     except Exception as e:
         await ctx.send(f"❌ Error retrieving stats: {e}")
@@ -7152,24 +6914,7 @@ async def ambassador_leaderboard(ctx):
         
         embed.set_footer(text="💡 Keep posting consistently to climb the leaderboard!")
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
     except Exception as e:
         await ctx.send(f"❌ Error retrieving leaderboard: {e}")
@@ -7345,24 +7090,7 @@ async def ambassadors_report(ctx, action=None):
             
             embed.add_field(name="📈 Summary", value=f"✅ On track: {compliant}\n⚠️ Behind pace: {behind}\n📊 Total posts: {total_submissions}", inline=True)
             
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
         except Exception as e:
             await ctx.send(f"❌ Error generating report: {e}")
@@ -7422,24 +7150,7 @@ async def ambassadors_report(ctx, action=None):
                     inline=False
                 )
             
-            # Send confirmation with rate limit handling
-        try:
             await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
             
         except Exception as e:
             await ctx.send(f"❌ Error checking submissions: {e}")
@@ -7685,24 +7396,7 @@ async def ambassador_detail(ctx, user: discord.Member = None):
         compliance = "✅ On Track" if month_points >= 75 else f"⚠️ Behind ({75 - month_points} pts needed)"
         embed.add_field(name="📈 Compliance", value=compliance, inline=False)
         
-        # Send confirmation with rate limit handling
-        try:
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                print(f"⚠️ Rate limited when sending bug confirmation. Waiting and trying simple message...")
-                try:
-                    # Wait a bit and try a simple text message instead
-                    await asyncio.sleep(2)
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully! Check the Google Sheets for tracking.")
-                except discord.HTTPException:
-                    print(f"⚠️ Still rate limited. Bug #{bug_id} was saved but confirmation failed.")
-            else:
-                print(f"⚠️ Discord error sending confirmation: {e}")
-                try:
-                    await ctx.send(f"✅ Bug #{bug_id} submitted successfully!")
-                except:
-                    print(f"⚠️ Failed to send any confirmation for bug #{bug_id}")
+        await ctx.send(embed=embed)
         
     except Exception as e:
         await ctx.send(f"❌ Error getting ambassador details: {e}")
