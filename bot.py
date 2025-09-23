@@ -2008,6 +2008,7 @@ class BetaTestingBot(commands.Bot):
         await self.scan_recent_history_silent()
         
         # Start background tasks
+        self.scheduled_update_task.start()
         self.ambassador_role_sync_task.start()
         self.ambassador_chat_sync_task.start()
         self.ambassador_points_audit_task.start()
