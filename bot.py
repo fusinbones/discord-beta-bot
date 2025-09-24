@@ -2806,8 +2806,10 @@ class BetaTestingBot(commands.Bot):
         # Check Google Sheets integration status
         sheets_status = "🟢 Active" if self.sheets_manager else "🔴 Offline"
         
-        # Only send update if there's activity OR it's a scheduled check-in
-        if new_messages > 2 or new_bugs > 0 or potential_bugs > 0 or hour in [9, 17, 22]:
+        # Always send update at scheduled times, or if there's significant activity
+        should_send_update = hour in [9, 17, 22] or new_messages > 2 or new_bugs > 0 or potential_bugs > 0
+        
+        if should_send_update:
             # Get AI summary of recent activity
             context = await self.get_recent_activity_context(hours_back)
             
@@ -2819,7 +2821,7 @@ class BetaTestingBot(commands.Bot):
         1. ONLY use information provided in the context data below
         2. NEVER mention users not listed in the context
         3. NEVER make up conversations or activities
-        4. If no activity is provided, say "Quiet period - no beta testing activity to report"
+        4. If no activity is provided, create an encouraging check-in message about Sidekick Tools testing progress and remind users to report any issues they encounter
         5. Only reference actual usernames and messages from the context data
 
         Focus on:
@@ -2880,7 +2882,7 @@ class BetaTestingBot(commands.Bot):
                     except Exception as e:
                         print(f"Error sending {period_name.lower()} update to {channel_id}: {e}")
         else:
-            print(f"⏰ {period_name} check: No significant activity, skipping update (Sheets: {sheets_status})")
+            print(f"⏰ {period_name} check: Not a scheduled broadcast time and no significant activity (Sheets: {sheets_status})")
     
     @tasks.loop(hours=6)  # Check every 6 hours
     async def ambassador_chat_sync_task(self):
