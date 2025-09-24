@@ -6374,7 +6374,7 @@ async def view_sheet(ctx):
     
     await ctx.send(embed=embed)
 
-@bot.command(name='test-update')
+@bot.command(name='test-update', aliases=['testupdate'])
 @commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
 async def test_scheduled_update(ctx):
     """Manually trigger a scheduled update for testing (Staff only)"""
@@ -6395,6 +6395,19 @@ async def test_scheduled_update(ctx):
         print(f"❌ Error in test update: {e}")
         import traceback
         traceback.print_exc()
+
+@bot.command(name='force-update')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def force_update(ctx):
+    """Force send a scheduled update now (Staff only)"""
+    try:
+        await ctx.send("🚀 Forcing scheduled update...")
+        current_hour = 22  # Use evening update format
+        await ctx.bot.send_scheduled_update(current_hour)
+        await ctx.send("✅ Forced update completed!")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+        print(f"❌ Force update error: {e}")
 
 @bot.command(name='sync')
 @commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
