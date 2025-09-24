@@ -2008,12 +2008,19 @@ class BetaTestingBot(commands.Bot):
         await self.scan_recent_history_silent()
         
         # Start background tasks
+        print("🚀 Starting scheduled update task...")
         self.scheduled_update_task.start()
+        print("🚀 Starting ambassador role sync task...")
         self.ambassador_role_sync_task.start()
+        print("🚀 Starting ambassador chat sync task...")
         self.ambassador_chat_sync_task.start()
+        print("🚀 Starting ambassador points audit task...")
         self.ambassador_points_audit_task.start()
+        print("🚀 Starting ambassador sheets sync task...")
         self.ambassador_sheets_sync_task.start()
+        print("🚀 Starting staff notification task...")
         self.staff_notification_task.start()
+        print("✅ All background tasks started successfully")
 
     async def on_member_update(self, before, after):
         """Handle member role changes - auto-sync ambassador status"""
@@ -2656,33 +2663,47 @@ class BetaTestingBot(commands.Bot):
     async def scheduled_update_task(self):
         """Send proactive updates 3 times per day: 9am, 5pm, 10pm EST and sync sheets"""
         
-        # Periodic Google Sheets sync for bug tracking
-        if hasattr(self, 'sheets_manager') and self.sheets_manager:
-            try:
-                await self.sync_bugs_to_sheets()
-            except Exception as e:
-                print(f"❌ Error in periodic sheets sync: {e}")
-        
-        # Get current time in EST
-        import pytz
-        est = pytz.timezone('US/Eastern')
-        current_time = datetime.now(est)
-        current_hour = current_time.hour
-        current_minute = current_time.minute
-        
-        # Target times: 9am, 5pm (17), 10pm (22) EST
-        target_hours = [9, 17, 22]
-        
-        # Only send updates at the target hours and within first 30 minutes
-        if current_hour in target_hours and current_minute < 30:
-            # Check if we already sent an update this hour
-            if not hasattr(self, '_last_update_hour') or self._last_update_hour != current_hour:
-                self._last_update_hour = current_hour
-                
+        try:
+            # Periodic Google Sheets sync for bug tracking
+            if hasattr(self, 'sheets_manager') and self.sheets_manager:
                 try:
-                    await self.send_scheduled_update(current_hour)
+                    await self.sync_bugs_to_sheets()
                 except Exception as e:
-                    print(f"Error in scheduled update: {e}")
+                    print(f"❌ Error in periodic sheets sync: {e}")
+            
+            # Get current time in EST
+            import pytz
+            est = pytz.timezone('US/Eastern')
+            current_time = datetime.now(est)
+            current_hour = current_time.hour
+            current_minute = current_time.minute
+            
+            print(f"🕐 Scheduled update check: {current_time.strftime('%Y-%m-%d %H:%M:%S EST')} (Hour: {current_hour}, Minute: {current_minute})")
+            
+            # Target times: 9am, 5pm (17), 10pm (22) EST
+            target_hours = [9, 17, 22]
+            
+            # Only send updates at the target hours and within first 30 minutes
+            if current_hour in target_hours and current_minute < 30:
+                print(f"📢 Target hour detected ({current_hour}), checking if update needed...")
+                # Check if we already sent an update this hour
+                if not hasattr(self, '_last_update_hour') or self._last_update_hour != current_hour:
+                    self._last_update_hour = current_hour
+                    print(f"🚀 Sending scheduled update for hour {current_hour}")
+                    
+                    try:
+                        await self.send_scheduled_update(current_hour)
+                    except Exception as e:
+                        print(f"❌ Error in scheduled update: {e}")
+                else:
+                    print(f"⏭️ Update already sent for hour {current_hour}")
+            else:
+                print(f"⏸️ Not a target hour or outside time window (Target hours: {target_hours})")
+                
+        except Exception as e:
+            print(f"❌ Error in scheduled_update_task: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def sync_bugs_to_sheets(self):
         """Sync all bugs from database to Google Sheets"""
@@ -6352,6 +6373,28 @@ async def view_sheet(ctx):
     embed.set_footer(text="💡 This sheet updates automatically when bugs are reported or status changes are made")
     
     await ctx.send(embed=embed)
+
+@bot.command(name='test-update')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def test_scheduled_update(ctx):
+    """Manually trigger a scheduled update for testing (Staff only)"""
+    try:
+        await ctx.send("🧪 Testing scheduled update system...")
+        
+        # Get current hour for testing
+        import pytz
+        est = pytz.timezone('US/Eastern')
+        current_time = datetime.now(est)
+        current_hour = current_time.hour
+        
+        await ctx.bot.send_scheduled_update(current_hour)
+        await ctx.send("✅ Test update sent successfully!")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error testing update: {e}")
+        print(f"❌ Error in test update: {e}")
+        import traceback
+        traceback.print_exc()
 
 @bot.command(name='sync')
 @commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
