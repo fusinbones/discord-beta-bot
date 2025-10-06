@@ -138,21 +138,25 @@ class GoogleSheetsManager:
                         return False
                         
         except Exception as e:
-            print(f"❌ Error adding bug to spreadsheet: {str(e)}")
             return False
     
     async def update_bug_status(self, bug_id: int, new_status: str) -> bool:
         """Update the status of a bug in the spreadsheet"""
         try:
-            # Find the bug row by searching in the Comments column (column J) 
-            # for "Discord Bug #{bug_id}"
+            print(f"🔍 Searching for bug #{bug_id} in spreadsheet...")
+            
+            # Find the bug in the spreadsheet
             bug_row = await self.find_bug_row(bug_id)
             if not bug_row:
                 print(f"⚠️ Bug #{bug_id} not found in spreadsheet")
+                print(f"💡 Make sure the bug was synced to Google Sheets")
                 return False
+            
+            print(f"✅ Found bug #{bug_id} at row {bug_row}")
             
             token = await self.get_access_token()
             if not token:
+                print(f"❌ Failed to get access token for Google Sheets")
                 raise Exception("Failed to get access token")
                 
             headers = {
@@ -161,10 +165,12 @@ class GoogleSheetsManager:
             }
             
             # Update the Status column (column I) for the found row
-            range_name = f"I{bug_row}"  # Status column
+            range_name = f"Issue Log!I{bug_row}"  # Status column with sheet name
             body = {
                 "values": [[new_status]]
             }
+            
+            print(f"📝 Updating range: {range_name} with status: {new_status}")
             
             url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
             params = {
@@ -173,16 +179,20 @@ class GoogleSheetsManager:
             
             async with aiohttp.ClientSession() as session:
                 async with session.put(url, headers=headers, params=params, json=body) as response:
+                    response_text = await response.text()
                     if response.status == 200:
-                        print(f"✅ Updated bug #{bug_id} status to {new_status}")
+                        print(f"✅ Updated bug #{bug_id} status to '{new_status}' in Google Sheets")
+                        print(f"📊 Response: {response_text}")
                         return True
                     else:
-                        error_text = await response.text()
-                        print(f"❌ Failed to update bug status: {response.status} - {error_text}")
+                        print(f"❌ Failed to update bug status: {response.status}")
+                        print(f"💬 Error details: {response_text}")
                         return False
                         
         except Exception as e:
             print(f"❌ Error updating bug status: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
     
     async def resolve_bug(self, bug_id: int) -> bool:
@@ -243,8 +253,11 @@ class GoogleSheetsManager:
     async def find_bug_row(self, bug_id: int) -> int:
         """Find the row number of a bug by searching in the Comments column"""
         try:
+            print(f"🔎 Looking for bug #{bug_id} in Comments column...")
+            
             token = await self.get_access_token()
             if not token:
+                print(f"❌ No access token available")
                 return None
                 
             headers = {
@@ -253,8 +266,10 @@ class GoogleSheetsManager:
             }
             
             # Get all data from Comments column (column J) starting from row 30
-            range_name = "J30:J"
+            range_name = "Issue Log!J30:J"
             url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+            
+            print(f"📊 Fetching range: {range_name}")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -262,20 +277,33 @@ class GoogleSheetsManager:
                         data = await response.json()
                         values = data.get('values', [])
                         
+                        print(f"📋 Found {len(values)} rows to search")
+                        
                         # Search for the bug ID in the Comments column
                         search_text = f"Discord Bug #{bug_id}"
+                        print(f"🔍 Searching for: '{search_text}'")
+                        
                         for row_idx, row_data in enumerate(values):
                             if row_data and len(row_data) > 0:
-                                if search_text in str(row_data[0]):
-                                    return row_idx + 30  # Return actual row number (30-based)
+                                cell_content = str(row_data[0])
+                                if search_text in cell_content:
+                                    actual_row = row_idx + 30
+                                    print(f"✅ Found match at row {actual_row}: '{cell_content[:100]}'")
+                                    return actual_row  # Return actual row number (30-based)
                         
+                        print(f"⚠️ Bug #{bug_id} not found in {len(values)} rows")
+                        print(f"💡 Search text used: '{search_text}'")
                         return None  # Bug not found
                     else:
+                        error_text = await response.text()
                         print(f"❌ Failed to search for bug: {response.status}")
+                        print(f"💬 Error: {error_text}")
                         return None
                         
         except Exception as e:
             print(f"❌ Error searching for bug: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
     async def initialize_spreadsheet(self) -> bool:

@@ -6411,6 +6411,31 @@ async def force_update(ctx):
         await ctx.send(f"❌ Error: {e}")
         print(f"❌ Force update error: {e}")
 
+@bot.command(name='test-resolve')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def test_resolve(ctx, bug_id: int):
+    """Test resolving a bug in Google Sheets (Staff only - for debugging)"""
+    try:
+        await ctx.send(f"🧪 Testing Google Sheets resolution for bug #{bug_id}...")
+        
+        if not ctx.bot.sheets_manager:
+            await ctx.send("❌ Google Sheets manager not initialized!")
+            return
+        
+        # Try to resolve the bug
+        success = await ctx.bot.sheets_manager.resolve_bug(bug_id)
+        
+        if success:
+            await ctx.send(f"✅ Bug #{bug_id} status updated to 'Resolved' in Google Sheets!")
+        else:
+            await ctx.send(f"❌ Failed to update bug #{bug_id} in Google Sheets. Check logs for details.")
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+        print(f"❌ Test resolve error: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.command(name='sync')
 @commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
 async def sync_missed_bugs(ctx, hours: int = 24):
