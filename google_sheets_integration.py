@@ -251,9 +251,9 @@ class GoogleSheetsManager:
             return False
     
     async def find_bug_row(self, bug_id: int) -> int:
-        """Find the row number of a bug by searching in the Comments column"""
+        """Find the row number of a bug by searching in the Bug # column (column A)"""
         try:
-            print(f"🔎 Looking for bug #{bug_id} in Comments column...")
+            print(f"🔎 Looking for bug #{bug_id} in Bug # column...")
             
             token = await self.get_access_token()
             if not token:
@@ -265,8 +265,8 @@ class GoogleSheetsManager:
                 "Content-Type": "application/json"
             }
             
-            # Get all data from Comments column (column J) starting from row 30
-            range_name = "Issue Log!J30:J"
+            # Get all data from Bug # column (column A) starting from row 30
+            range_name = "Issue Log!A30:A"
             url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
             
             print(f"📊 Fetching range: {range_name}")
@@ -279,20 +279,23 @@ class GoogleSheetsManager:
                         
                         print(f"📋 Found {len(values)} rows to search")
                         
-                        # Search for the bug ID in the Comments column
-                        search_text = f"Discord Bug #{bug_id}"
-                        print(f"🔍 Searching for: '{search_text}'")
+                        # Search for the bug ID in column A
+                        print(f"🔍 Searching for bug ID: {bug_id}")
                         
                         for row_idx, row_data in enumerate(values):
                             if row_data and len(row_data) > 0:
-                                cell_content = str(row_data[0])
-                                if search_text in cell_content:
-                                    actual_row = row_idx + 30
-                                    print(f"✅ Found match at row {actual_row}: '{cell_content[:100]}'")
-                                    return actual_row  # Return actual row number (30-based)
+                                cell_content = str(row_data[0]).strip()
+                                # Match exact bug ID (convert to int for comparison)
+                                try:
+                                    if int(cell_content) == bug_id:
+                                        actual_row = row_idx + 30
+                                        print(f"✅ Found bug #{bug_id} at row {actual_row}")
+                                        return actual_row  # Return actual row number (30-based)
+                                except (ValueError, TypeError):
+                                    # Skip non-numeric values
+                                    continue
                         
                         print(f"⚠️ Bug #{bug_id} not found in {len(values)} rows")
-                        print(f"💡 Search text used: '{search_text}'")
                         return None  # Bug not found
                     else:
                         error_text = await response.text()
