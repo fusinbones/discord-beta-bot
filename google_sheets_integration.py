@@ -265,43 +265,62 @@ class GoogleSheetsManager:
                 "Content-Type": "application/json"
             }
             
-            # Get all data from Bug # column (column A) starting from row 30
-            range_name = "Issue Log!A30:A"
-            url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+            # Try multiple possible sheet names
+            possible_ranges = [
+                "Issue Log!A30:A",
+                "A30:A",  # Default sheet
+                "Sheet1!A30:A"
+            ]
             
-            print(f"📊 Fetching range: {range_name}")
+            values = None
+            successful_range = None
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        values = data.get('values', [])
-                        
-                        print(f"📋 Found {len(values)} rows to search")
-                        
-                        # Search for the bug ID in column A
-                        print(f"🔍 Searching for bug ID: {bug_id}")
-                        
-                        for row_idx, row_data in enumerate(values):
-                            if row_data and len(row_data) > 0:
-                                cell_content = str(row_data[0]).strip()
-                                # Match exact bug ID (convert to int for comparison)
-                                try:
-                                    if int(cell_content) == bug_id:
-                                        actual_row = row_idx + 30
-                                        print(f"✅ Found bug #{bug_id} at row {actual_row}")
-                                        return actual_row  # Return actual row number (30-based)
-                                except (ValueError, TypeError):
-                                    # Skip non-numeric values
-                                    continue
-                        
-                        print(f"⚠️ Bug #{bug_id} not found in {len(values)} rows")
-                        return None  # Bug not found
-                    else:
-                        error_text = await response.text()
-                        print(f"❌ Failed to search for bug: {response.status}")
-                        print(f"💬 Error: {error_text}")
-                        return None
+            for range_name in possible_ranges:
+                url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+                print(f"📊 Trying range: {range_name}")
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            values = data.get('values', [])
+                            successful_range = range_name
+                            print(f"✅ Successfully fetched {len(values)} rows from {range_name}")
+                            break
+                        else:
+                            error_text = await response.text()
+                            print(f"⚠️ Failed to fetch {range_name}: {response.status}")
+            
+            if not values:
+                print(f"❌ Could not fetch data from any sheet range")
+                return None
+            
+            print(f"📋 Searching {len(values)} rows for bug #{bug_id}")
+            
+            # Debug: Show first few and last few bug IDs found
+            sample_bugs = []
+            for idx, row_data in enumerate(values[:5]):
+                if row_data and len(row_data) > 0:
+                    sample_bugs.append(f"Row {idx+30}: '{row_data[0]}'")
+            print(f"📝 Sample data (first 5): {sample_bugs}")
+            
+            # Search for the bug ID in column A
+            for row_idx, row_data in enumerate(values):
+                if row_data and len(row_data) > 0:
+                    cell_content = str(row_data[0]).strip()
+                    # Match exact bug ID (convert to int for comparison)
+                    try:
+                        if int(cell_content) == bug_id:
+                            actual_row = row_idx + 30
+                            print(f"✅ Found bug #{bug_id} at row {actual_row}")
+                            return actual_row  # Return actual row number (30-based)
+                    except (ValueError, TypeError):
+                        # Skip non-numeric values
+                        continue
+            
+            print(f"⚠️ Bug #{bug_id} not found in {len(values)} rows")
+            print(f"💡 Searched using range: {successful_range}")
+            return None  # Bug not found
                         
         except Exception as e:
             print(f"❌ Error searching for bug: {str(e)}")

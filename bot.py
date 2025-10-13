@@ -6436,6 +6436,44 @@ async def test_resolve(ctx, bug_id: int):
         import traceback
         traceback.print_exc()
 
+@bot.command(name='find-bug')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def find_bug_in_sheets(ctx, bug_id: int):
+    """Find a bug in Google Sheets and show its row number (Staff only - for debugging)"""
+    try:
+        await ctx.send(f"🔍 Searching for bug #{bug_id}...")
+        
+        # Check if bug exists in local database
+        with sqlite3.connect('beta_testing.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, bug_description, status FROM bugs WHERE id = ?', (bug_id,))
+            bug = cursor.fetchone()
+            
+            if bug:
+                bug_id_db, description, status = bug
+                await ctx.send(f"📂 **Database:** Bug #{bug_id} found\n**Status:** {status}\n**Description:** {description[:100]}...")
+            else:
+                await ctx.send(f"⚠️ Bug #{bug_id} not found in local database")
+                return
+        
+        if not ctx.bot.sheets_manager:
+            await ctx.send("❌ Google Sheets manager not initialized!")
+            return
+        
+        # Try to find the bug in sheets
+        row_number = await ctx.bot.sheets_manager.find_bug_row(bug_id)
+        
+        if row_number:
+            await ctx.send(f"✅ **Google Sheets:** Found at row {row_number}")
+        else:
+            await ctx.send(f"❌ **Google Sheets:** Bug #{bug_id} not found. Check logs for details.")
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+        print(f"❌ Find bug error: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.command(name='sync')
 @commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
 async def sync_missed_bugs(ctx, hours: int = 24):
