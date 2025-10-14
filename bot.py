@@ -5635,7 +5635,7 @@ async def resolve_bug(ctx, bug_id: int):
         bug = cursor.fetchone()
         
         if not bug:
-            await ctx.send(f"❌ Bug #{bug_id} not found.")
+            await ctx.send(f"❌ Bug #{bug_id} not found in Discord database.\n💡 If this bug was manually added to Google Sheets, use `!sheets-resolve {bug_id}` instead.")
             return
         
         bug_id_db, bug_username, description, current_status = bug
@@ -6453,8 +6453,7 @@ async def find_bug_in_sheets(ctx, bug_id: int):
                 bug_id_db, description, status = bug
                 await ctx.send(f"📂 **Database:** Bug #{bug_id} found\n**Status:** {status}\n**Description:** {description[:100]}...")
             else:
-                await ctx.send(f"⚠️ Bug #{bug_id} not found in local database")
-                return
+                await ctx.send(f"⚠️ Bug #{bug_id} not found in local database (manually added to sheets)")
         
         if not ctx.bot.sheets_manager:
             await ctx.send("❌ Google Sheets manager not initialized!")
@@ -6471,6 +6470,49 @@ async def find_bug_in_sheets(ctx, bug_id: int):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
         print(f"❌ Find bug error: {e}")
+        import traceback
+        traceback.print_exc()
+
+@bot.command(name='sheets-resolve')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def sheets_resolve_bug(ctx, bug_id: int):
+    """Resolve a bug directly in Google Sheets (Staff only - works for manually-added bugs)"""
+    try:
+        if not ctx.bot.sheets_manager:
+            await ctx.send("❌ Google Sheets manager not initialized!")
+            return
+        
+        await ctx.send(f"🔄 Updating bug #{bug_id} in Google Sheets...")
+        
+        # Try to resolve the bug directly in sheets
+        success = await ctx.bot.sheets_manager.resolve_bug(bug_id)
+        
+        if success:
+            embed = discord.Embed(
+                title="✅ Bug Resolved in Google Sheets!",
+                description=f"Bug #{bug_id} has been marked as 'Resolved' in the spreadsheet.",
+                color=0x00ff00
+            )
+            embed.add_field(name="📊 Updated By", value=ctx.author.display_name, inline=True)
+            embed.add_field(name="📅 Updated At", value=datetime.now().strftime("%Y-%m-%d %H:%M"), inline=True)
+            embed.set_footer(text="💡 Use this command for bugs manually added to Google Sheets")
+            
+            await ctx.send(embed=embed)
+            
+            # Also update local database if the bug exists there
+            with sqlite3.connect('beta_testing.db') as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id FROM bugs WHERE id = ?', (bug_id,))
+                if cursor.fetchone():
+                    cursor.execute('UPDATE bugs SET status = ? WHERE id = ?', ('fixed', bug_id))
+                    conn.commit()
+                    await ctx.send("✅ Also updated local database")
+        else:
+            await ctx.send(f"❌ Failed to update bug #{bug_id} in Google Sheets. Check logs for details.\n💡 Use `!find-bug {bug_id}` to verify the bug exists.")
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+        print(f"❌ Sheets resolve error: {e}")
         import traceback
         traceback.print_exc()
 
