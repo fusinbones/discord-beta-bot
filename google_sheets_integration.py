@@ -79,11 +79,28 @@ class GoogleSheetsManager:
             return None
     
     async def add_bug_to_sheet(self, bug_data: Dict):
-        """Add a new bug to the Google Sheet"""
+        """Add a new bug to the Google Sheet (checks for duplicates first)"""
         try:
+            bug_id = bug_data.get('bug_id', '')
+            
+            # Check if bug already exists to prevent duplicates
+            print(f"🔍 Checking if bug #{bug_id} already exists in spreadsheet...")
+            existing_row = await self.find_bug_row(bug_id)
+            
+            if existing_row:
+                print(f"⏭️ Bug #{bug_id} already exists at row {existing_row}, skipping duplicate")
+                # Optionally update the status if it changed
+                current_status = bug_data.get('status', 'Open')
+                if current_status == 'fixed':
+                    print(f"🔄 Bug #{bug_id} is marked as fixed, updating status in sheet...")
+                    return await self.update_bug_status(bug_id, 'Resolved')
+                return True  # Already exists, no need to add
+            
+            print(f"✅ Bug #{bug_id} not found in sheet, proceeding to add it...")
+            
             # Map the bug data to match spreadsheet columns
             values = [
-                bug_data.get('bug_id', ''),  # Bug # (column A)  
+                bug_id,  # Bug # (column A)  
                 "Issue",  # Issue Type (column B) - defaulting to "Issue" for Discord bugs
                 bug_data.get('area', 'Other'),  # Area (column C) - default to Other if not detected
                 bug_data.get('description', ''),  # Description (column D)
@@ -92,7 +109,7 @@ class GoogleSheetsManager:
                 f"{bug_data.get('username', '')} (Added by: {bug_data.get('added_by', bug_data.get('username', ''))})",  # Reported by (column G)
                 bug_data.get('timestamp', ''),  # Date entered (column H)
                 bug_data.get('status', 'Open'),  # Status (column I)
-                f"Discord Bug #{bug_data.get('bug_id', '')} - Channel: <#{bug_data.get('channel_id', '')}>"  # Comments (column J)
+                f"Discord Bug #{bug_id} - Channel: <#{bug_data.get('channel_id', '')}>"  # Comments (column J)
             ]
             
             # Use a targeted range that will append after existing data in the used range
@@ -118,19 +135,14 @@ class GoogleSheetsManager:
             }
             
             async with aiohttp.ClientSession() as session:
-                print(f"🔄 Attempting to add bug to Google Sheets...")
-                print(f"📊 Bug data: {bug_data}")
-                print(f"📝 Values to insert: {values}")
-                print(f"🎯 Range: {range_name}")
-                print(f"🔗 URL: {url}")
+                print(f"🔄 Adding bug #{bug_id} to Google Sheets...")
                 
                 async with session.post(url, headers=headers, params=params, json=body) as response:
                     response_text = await response.text()
                     print(f"📡 Response status: {response.status}")
-                    print(f"📄 Response: {response_text}")
                     
                     if response.status == 200:
-                        print(f"✅ Bug #{bug_data.get('bug_id', '')} added to spreadsheet successfully")
+                        print(f"✅ Bug #{bug_id} added to spreadsheet successfully")
                         return True
                     else:
                         print(f"❌ Failed to add bug to spreadsheet: {response.status}")
@@ -138,6 +150,9 @@ class GoogleSheetsManager:
                         return False
                         
         except Exception as e:
+            print(f"❌ Error in add_bug_to_sheet: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     async def update_bug_status(self, bug_id: int, new_status: str) -> bool:

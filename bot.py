@@ -5663,13 +5663,18 @@ async def resolve_bug(ctx, bug_id: int):
     sheets_success = False
     if ctx.bot.sheets_manager:
         try:
+            print(f"🔄 Attempting to resolve bug #{bug_id} in Google Sheets...")
             sheets_success = await ctx.bot.sheets_manager.resolve_bug(bug_id)
             if sheets_success:
                 print(f"✅ Updated bug #{bug_id} status to 'Resolved' in Google Sheets")
             else:
-                print(f"⚠️ Failed to update bug #{bug_id} in Google Sheets")
+                print(f"⚠️ Failed to update bug #{bug_id} in Google Sheets - check logs above for details")
         except Exception as e:
             print(f"❌ Error updating Google Sheets: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"⚠️ Google Sheets manager not initialized, skipping sheets update")
     
     # Create success embed
     embed = discord.Embed(
@@ -6513,6 +6518,28 @@ async def sheets_resolve_bug(ctx, bug_id: int):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
         print(f"❌ Sheets resolve error: {e}")
+        import traceback
+        traceback.print_exc()
+
+@bot.command(name='resync-bugs')
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def resync_bugs(ctx):
+    """Force a full bug sync to Google Sheets (Staff only - now prevents duplicates)"""
+    try:
+        if not ctx.bot.sheets_manager:
+            await ctx.send("❌ Google Sheets manager not initialized!")
+            return
+        
+        status_msg = await ctx.send("🔄 Starting bug resync to Google Sheets (with duplicate prevention)...")
+        
+        # Run the sync
+        await ctx.bot.sync_bugs_to_sheets()
+        
+        await status_msg.edit(content="✅ Bug resync completed! Check logs for details.\n💡 Existing bugs were skipped to prevent duplicates.")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error during resync: {e}")
+        print(f"❌ Resync error: {e}")
         import traceback
         traceback.print_exc()
 
