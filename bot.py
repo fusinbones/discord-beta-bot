@@ -2706,7 +2706,7 @@ class BetaTestingBot(commands.Bot):
             traceback.print_exc()
     
     async def sync_bugs_to_sheets(self):
-        """Sync all bugs from database to Google Sheets"""
+        """Sync all bugs from database to Google Sheets (only unsynced bugs)"""
         try:
             if not self.sheets_manager:
                 return
@@ -2716,17 +2716,37 @@ class BetaTestingBot(commands.Bot):
             with sqlite3.connect('beta_testing.db') as conn:
                 cursor = conn.cursor()
                 
-                # Get all bugs that need syncing
-                cursor.execute('''
-                    SELECT id, user_id, username, bug_description, timestamp, 
-                           status, channel_id, added_by
-                    FROM bugs 
-                    ORDER BY timestamp DESC
-                ''')
+                # Check if synced_to_sheets column exists
+                cursor.execute("PRAGMA table_info(bugs)")
+                columns = [column[1] for column in cursor.fetchall()]
+                has_synced_flag = 'synced_to_sheets' in columns
+                
+                if has_synced_flag:
+                    # Get only bugs that haven't been synced yet
+                    cursor.execute('''
+                        SELECT id, user_id, username, bug_description, timestamp, 
+                               status, channel_id, added_by
+                        FROM bugs 
+                        WHERE synced_to_sheets = 0 OR synced_to_sheets IS NULL
+                        ORDER BY timestamp DESC
+                    ''')
+                    print("📊 Syncing only unsynced bugs (using synced_to_sheets flag)")
+                else:
+                    # Fallback: get all bugs (old behavior)
+                    cursor.execute('''
+                        SELECT id, user_id, username, bug_description, timestamp, 
+                               status, channel_id, added_by
+                        FROM bugs 
+                        ORDER BY timestamp DESC
+                    ''')
+                    print("⚠️ No synced_to_sheets column - syncing all bugs (duplicates may occur)")
                 
                 all_bugs = cursor.fetchall()
+                print(f"📋 Found {len(all_bugs)} bug(s) to sync")
                 
                 synced_count = 0
+                skipped_count = 0
+                
                 for bug_data in all_bugs:
                     bug_id, user_id, username, description, timestamp, status, channel_id, added_by = bug_data
                     
@@ -2744,19 +2764,31 @@ class BetaTestingBot(commands.Bot):
                             'added_by': added_by
                         }
                         
-                        # Try to sync to sheets (will update if exists, add if new)
+                        # Try to sync to sheets (will skip if exists due to duplicate check)
                         result = await self.sheets_manager.add_bug_to_sheet(sheets_bug_data)
+                        
                         if result:
                             synced_count += 1
+                            
+                            # Mark as synced if we have the flag
+                            if has_synced_flag:
+                                cursor.execute('''
+                                    UPDATE bugs SET synced_to_sheets = 1 WHERE id = ?
+                                ''', (bug_id,))
+                                conn.commit()
+                        else:
+                            skipped_count += 1
                             
                     except Exception as e:
                         print(f"⚠️ Failed to sync bug #{bug_id}: {e}")
                         continue
                 
-                print(f"✅ Synced {synced_count} bugs to Google Sheets")
+                print(f"✅ Sync complete: {synced_count} added, {skipped_count} skipped (already exist)")
                 
         except Exception as e:
             print(f"❌ Error in sync_bugs_to_sheets: {e}")
+            import traceback
+            traceback.print_exc()
     
     async def send_scheduled_update(self, hour):
         """Send automated update to beta channels with Google Sheets integration status"""
@@ -4243,19 +4275,40 @@ async def report_bug(ctx, *, description=None):
                 with sqlite3.connect('beta_testing.db', timeout=30.0) as conn:
                     cursor = conn.cursor()
                     
-                    cursor.execute('''
-                        INSERT INTO bugs (user_id, username, bug_description, timestamp, status, staff_notified, channel_id, added_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        str(ctx.author.id),
-                        ctx.author.display_name,
-                        full_description,
-                        datetime.now().isoformat(),
-                        'open',
-                        True,
-                        str(ctx.channel.id),
-                        ctx.author.display_name
-                    ))
+                    # Check if synced_to_sheets column exists
+                    cursor.execute("PRAGMA table_info(bugs)")
+                    columns = [column[1] for column in cursor.fetchall()]
+                    has_synced_flag = 'synced_to_sheets' in columns
+                    
+                    if has_synced_flag:
+                        cursor.execute('''
+                            INSERT INTO bugs (user_id, username, bug_description, timestamp, status, staff_notified, channel_id, added_by, synced_to_sheets)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            str(ctx.author.id),
+                            ctx.author.display_name,
+                            full_description,
+                            datetime.now().isoformat(),
+                            'open',
+                            True,
+                            str(ctx.channel.id),
+                            ctx.author.display_name,
+                            0  # Will be marked as 1 after successful sync
+                        ))
+                    else:
+                        cursor.execute('''
+                            INSERT INTO bugs (user_id, username, bug_description, timestamp, status, staff_notified, channel_id, added_by)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            str(ctx.author.id),
+                            ctx.author.display_name,
+                            full_description,
+                            datetime.now().isoformat(),
+                            'open',
+                            True,
+                            str(ctx.channel.id),
+                            ctx.author.display_name
+                        ))
                     
                     bug_id = cursor.lastrowid
                     conn.commit()
@@ -4316,6 +4369,14 @@ async def report_bug(ctx, *, description=None):
                 if sheets_result:
                     print(f"✅ Successfully added bug #{bug_id} to Google Sheets")
                     sheets_success = True
+                    
+                    # Mark as synced in database
+                    if has_synced_flag:
+                        with sqlite3.connect('beta_testing.db') as conn:
+                            cursor = conn.cursor()
+                            cursor.execute('UPDATE bugs SET synced_to_sheets = 1 WHERE id = ?', (bug_id,))
+                            conn.commit()
+                            print(f"✅ Marked bug #{bug_id} as synced in database")
                 else:
                     print(f"❌ Failed to add bug #{bug_id} to Google Sheets - API returned False")
                     sheets_success = False
