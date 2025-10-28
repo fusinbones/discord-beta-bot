@@ -2943,16 +2943,18 @@ class BetaTestingBot(commands.Bot):
                         print(f"   - #{channel.name}")
                 return
             
-            # Scan ALL messages in ambassador channels (full history)
+            # Scan recent messages in ambassador channels (last 7 hours to account for slight drift)
             scanned_messages = 0
             processed_submissions = 0
+            lookback_hours = 7  # Slightly more than task interval (6h) to prevent gaps
             
             for channel in ambassador_channels:
                 try:
-                    print(f"📚 Scanning full history of #{channel.name}...")
+                    print(f"📚 Scanning last {lookback_hours} hours of #{channel.name}...")
                     
-                    # Scan ALL messages (no time limit)
-                    async for message in channel.history(limit=None):
+                    # Only scan recent messages since last sync
+                    cutoff_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+                    async for message in channel.history(limit=500, after=cutoff_time):
                         scanned_messages += 1
                         
                         # Skip bot messages
@@ -6579,6 +6581,28 @@ async def sheets_resolve_bug(ctx, bug_id: int):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
         print(f"❌ Sheets resolve error: {e}")
+        import traceback
+        traceback.print_exc()
+
+@bot.command(name='sync-bugs', aliases=['syncbugs'])
+@commands.has_any_role('Staff', 'Admin', 'Moderator', 'Developer')
+async def sync_bugs_simple(ctx):
+    """✨ Simple one-command sync: Updates Google Sheets with all new bugs from database"""
+    try:
+        if not ctx.bot.sheets_manager:
+            await ctx.send("❌ Google Sheets not configured!")
+            return
+        
+        status_msg = await ctx.send("🔄 Syncing bugs to Google Sheets...")
+        
+        # Run the sync - this handles duplicates automatically
+        await ctx.bot.sync_bugs_to_sheets()
+        
+        await status_msg.edit(content="✅ **Sync complete!** All new bugs are now in the sheet.\n💡 Duplicates were automatically skipped.")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Sync failed: {e}")
+        print(f"❌ Sync error: {e}")
         import traceback
         traceback.print_exc()
 
