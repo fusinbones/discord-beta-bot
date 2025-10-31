@@ -2979,9 +2979,9 @@ class BetaTestingBot(commands.Bot):
                                     if has_url:
                                         urls = [word for word in message.content.split() if word.startswith(('http://', 'https://'))]
                                         for url in urls:
-                                            # Create unique hash for duplicate detection
+                                            # Create unique hash for duplicate detection (based on ambassador + URL only)
                                             import hashlib
-                                            content_hash = hashlib.md5(f"{ambassador_id}_{url}_{message.id}".encode()).hexdigest()
+                                            content_hash = hashlib.md5(f"{ambassador_id}_{url}".encode()).hexdigest()
                                             
                                             # Check if already in submissions table
                                             existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
@@ -3026,9 +3026,11 @@ class BetaTestingBot(commands.Bot):
                                     if has_attachment:
                                         for attachment in message.attachments:
                                             if attachment.content_type and attachment.content_type.startswith('image/'):
-                                                # Create unique hash for duplicate detection
+                                                # Create unique hash for duplicate detection (based on ambassador + attachment filename + size)
                                                 import hashlib
-                                                content_hash = hashlib.md5(f"{ambassador_id}_{attachment.url}_{message.id}".encode()).hexdigest()
+                                                # Use filename and size instead of Discord URL (which expires) or message ID
+                                                unique_identifier = f"{attachment.filename}_{attachment.size}"
+                                                content_hash = hashlib.md5(f"{ambassador_id}_{unique_identifier}".encode()).hexdigest()
                                                 
                                                 # Check if already in submissions table
                                                 existing = self.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
@@ -3246,26 +3248,50 @@ class BetaTestingBot(commands.Bot):
             for ambassador in ambassadors:
                 discord_id = ambassador['discord_id']
                 username = ambassador['username']
-                stored_points = ambassador.get('current_month_points', 0)
+                stored_month_points = ambassador.get('current_month_points', 0)
+                stored_total_points = ambassador.get('total_points', 0)
                 
-                # Get all submissions and calculate correct points
+                # Get all valid, non-duplicate submissions
                 submissions_result = self.ambassador_program.supabase.table('submissions').select('*').eq('ambassador_id', discord_id).execute()
-                submissions = submissions_result.data
+                all_submissions = submissions_result.data
                 
-                # Calculate actual points from submissions
-                calculated_points = sum(sub.get('points_awarded', 0) for sub in submissions)
+                # Filter out duplicates and rejected submissions
+                valid_submissions = [
+                    sub for sub in all_submissions 
+                    if not sub.get('is_duplicate', False) and sub.get('validity_status') != 'rejected'
+                ]
+                
+                # Calculate current month points (only submissions from this month)
+                from datetime import datetime
+                current_month = datetime.now().month
+                current_year = datetime.now().year
+                
+                month_submissions = [
+                    sub for sub in valid_submissions
+                    if sub.get('timestamp') and 
+                    datetime.fromisoformat(sub['timestamp'].replace('Z', '+00:00')).month == current_month and
+                    datetime.fromisoformat(sub['timestamp'].replace('Z', '+00:00')).year == current_year
+                ]
+                
+                calculated_month_points = sum(sub.get('points_awarded', 0) for sub in month_submissions)
+                calculated_total_points = sum(sub.get('points_awarded', 0) for sub in valid_submissions)
                 
                 # Check for discrepancies
-                if stored_points != calculated_points:
+                month_diff = stored_month_points - calculated_month_points
+                total_diff = stored_total_points - calculated_total_points
+                
+                if month_diff != 0 or total_diff != 0:
                     total_discrepancies += 1
-                    discrepancy = stored_points - calculated_points
                     
-                    print(f"🔧 Fixing {username}: {stored_points} → {calculated_points} pts (diff: {discrepancy})")
+                    print(f"🔧 Fixing {username}:")
+                    print(f"   Month: {stored_month_points} → {calculated_month_points} pts (diff: {month_diff})")
+                    print(f"   Total: {stored_total_points} → {calculated_total_points} pts (diff: {total_diff})")
+                    print(f"   Valid submissions: {len(valid_submissions)} (excluding {len(all_submissions) - len(valid_submissions)} duplicates/rejected)")
                     
                     # Update with correct points
                     self.ambassador_program.supabase.table('ambassadors').update({
-                        'current_month_points': calculated_points,
-                        'total_points': calculated_points  # Assuming single month for now
+                        'current_month_points': calculated_month_points,
+                        'total_points': calculated_total_points
                     }).eq('discord_id', discord_id).execute()
                     
                     fixed_count += 1
