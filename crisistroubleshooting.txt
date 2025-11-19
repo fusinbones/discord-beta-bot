@@ -1,0 +1,136 @@
+﻿Sidekick Tools – Full Troubleshooting Guide
+________________
+
+
+Unable to Link Closet Due to Captcha Issue / 429 Error / 502 Error / Request Denied
+If you’re trying to link your closet in the automation side of the app and you’re getting a captcha issue, it is because of Poshmark’s new update.
+You need to try linking your closet again.
+Before Linking
+First, please make sure you’ve updated your password on Poshmark and confirm it by logging into the Poshmark app or website.
+How to Link Your Closet
+1. Open the app and select Automation.
+2. Tap on the three lines in the upper right corner.
+3. Choose Manage Closets and click the plus sign to add a new closet.
+4. Enter the name of your closet without the '@' symbol and make sure it is all lowercase.
+5. Poshmark will send you a verification code by email or phone.
+6. Enter the code and click Verify.
+
+Once done, the app will take 1–2 minutes to link your closet.
+If you still get the error, please try again on our web version: app.crosslisting.com
+Video Guides
+Mobile app:
+ https://www.youtube.com/shorts/pKDGPm8fVkc
+Web app:
+ https://www.youtube.com/watch?v=6ASx9MaE-RM
+If you still run into issues, please try again after some time.
+________________
+
+
+Closet Is Linked but the App Is Prompting to Relink Again and Again
+Please note that if the app keeps prompting you to relink, here’s what’s happening:
+   * Poshmark Listing Disruption update has not rolled out yet.
+   * They are still restoring user listings.
+   * Their new security measures are causing closet connections with third-party apps to expire.
+   * You may need to relink again until their update is fully rolled out.
+   * If it repeats too frequently, we recommend waiting a bit.
+   * Once your closet stays linked, sharing will resume normally.
+
+As always, first make sure you’ve updated your Poshmark password and confirmed it by logging into the Poshmark app or website.
+How to Unlink the Closet
+      1. Open the app and select Automation.
+      2. Tap the three lines in the upper right corner.
+      3. Navigate to the Manage Closet section.
+      4. Swipe left on the closet name and click Unlink.
+
+How to Relink the Closet
+         1. Open the app and select Automation.
+         2. Tap the three lines at the top right corner.
+         3. Choose Manage Closets → press the plus sign.
+         4. Enter your closet name without '@' and in all lowercase.
+Video Guides
+Mobile: https://www.youtube.com/shorts/pKDGPm8fVkc
+ Web: https://www.youtube.com/watch?v=6ASx9MaE-RM
+If you run into the issue again, please try unlinking and relinking your closet after some time.
+________________
+
+
+Closet Is Linked but the App Is Not Sharing Your Closet
+Please note that the closet is linked, but as soon as you turn on the sharing you get a relink notification. This means that your closet connection with our app is expiring due to Poshmark’s new update.
+Please note that the update is not rolled out yet. However, as soon as the rollout is complete, your closet will stay linked and sharing will start working successfully.
+First, please make sure you’ve updated your Poshmark password and confirmed it by logging into the Poshmark app or website.
+If the app states to unlink and relink again, please relink it.
+How to Unlink the Closet
+         1. Open the app and select Automation.
+         2. Tap on the three lines at the top right corner.
+         3. Go to Manage Closet.
+         4. Swipe left and click Unlink.
+
+How to Relink the Closet
+            1. Open the app and select Automation.
+            2. Tap the three lines
+            3. Choose Manage Closets → plus sign.
+            4. Enter your closet name without '@' and in lowercase.
+
+Video Guides
+Mobile: https://www.youtube.com/shorts/pKDGPm8fVkc
+ Web: https://www.youtube.com/watch?v=6ASx9MaE-RM
+________________
+
+
+Closet Is Linked and Sharing but Offers to Likers Are Not Working
+Please note that if the closet is linked and the app is sharing, you should first check the Offers to Likers settings.
+How to Check Offers to Likers Settings
+               1. Open the app and click Automation.
+               2. Click on the gear icon to access settings.
+               3. Check Offer to Likers settings (e.g., Listing Discount, Shipping Discount).
+
+Check the Activity Section
+                  1. Open the app → Automation
+                  2. Click Quick Start
+                  3. Click Activities
+                  4. Select Offers
+                  5. Review which items the app has sent offers on
+If both checks show nothing and the app says to relink, this means your closet connection has expired. Please relink your closet again.
+________________
+
+
+Closet Is Linked but the App Is Not Doing Auctions
+Our tech team is pushing an update for auctions today, and as soon as the auction update is completed, we’ll let you know.
+________________
+
+
+Unable to Update Password in Sidekick Tools
+Password Reset is under maintenance by our technical team.
+An update is being pushed for Password Reset, and we will notify you as soon as it’s completed.
+If you’re unable to log into the app, please let us know — we’ll reset your password on our end.
+________________
+
+
+Unable to Log Into the App
+If you’re unable to log into the app, please try uninstalling and reinstalling the app and try again.
+________________
+
+
+Unable to Log In via Google and Facebook
+Google and Facebook Sign-In are under maintenance by our tech team.
+Our team is pushing an update for this as well.
+Once there is an update, we’ll let you know.
+Please let us know — we can update your credentials so you can log into the app via email and password instead.
+________________
+
+
+Getting a “Closet Already Linked” Error
+Please note that the closet is already linked to your account.
+You need to:
+                  1. Log out of the app
+                  2. Log back in
+
+Simply closing and reopening the app will not work.
+Alternatively, you can uninstall and reinstall the app.
+________________
+
+
+Unable to Link Closet Due to Rate Limit Excess Issue
+Please note that this error occurs due to excessive Poshmark login attempts.
+You can only log into your closet 10 times per day.
+Once you exceed the limit, please try again tomorrow.

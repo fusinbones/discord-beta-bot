@@ -61,6 +61,31 @@ elevenlabs_api_key = None  # os.getenv('ELEVENLABS_API_KEY') - temporarily disab
 FIRECRAWL_API_KEY = os.getenv('FIRECRAWL_API_KEY')
 FIRECRAWL_MCP_URL = os.getenv('FIRECRAWL_MCP_URL', 'https://mcp.firecrawl.com/sse')
 
+# === CUSTOMER SUPPORT - CRISIS MODE ===
+# Support channel configuration
+SUPPORT_CHANNEL_ID = 906704950908821507
+
+# Load crisis troubleshooting guide
+def load_crisis_guide():
+    """Load the crisis troubleshooting instructions from file"""
+    try:
+        with open('crisistroubleshooting.txt', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print("⚠️ crisistroubleshooting.txt not found - crisis support disabled")
+        return None
+
+CRISIS_GUIDE = load_crisis_guide()
+
+# Keywords that indicate crisis-related issues
+CRISIS_KEYWORDS = [
+    'link', 'unlink', 'relink', 'closet', 'poshmark', 'captcha', 
+    '429', '502', 'error', 'denied', 'sharing', 'share',
+    'automation', 'offers', 'likers', 'auction', 'password',
+    'login', 'log in', 'google', 'facebook', 'rate limit',
+    'verification', 'verify', 'code', 'connect', 'disconnect'
+]
+
 # === NATURAL CONVERSATION SYSTEM ===
 class NaturalConversationSystem:
     def __init__(self, bot):
@@ -209,6 +234,97 @@ class NaturalConversationSystem:
         ]
         
         return random.choice(suggestions)
+
+# === CUSTOMER SUPPORT FUNCTIONS ===
+def is_crisis_related(message_content: str) -> bool:
+    """Detect if message is related to current Poshmark crisis issues"""
+    content_lower = message_content.lower()
+    return any(keyword in content_lower for keyword in CRISIS_KEYWORDS)
+
+async def handle_crisis_support(message: discord.Message):
+    """Provide crisis support using troubleshooting guide"""
+    try:
+        if not CRISIS_GUIDE:
+            # No guide loaded, escalate to staff
+            await escalate_to_staff(message)
+            return
+        
+        # Use Claude to find relevant section and respond
+        prompt = f"""You are Jim, a helpful Sidekick Tools support agent handling a Poshmark crisis situation.
+
+CRISIS TROUBLESHOOTING GUIDE:
+{CRISIS_GUIDE}
+
+USER QUESTION: {message.content}
+
+INSTRUCTIONS:
+1. Identify which section of the guide matches their issue
+2. Provide the relevant step-by-step instructions from the guide
+3. Keep response under 300 words, clear and friendly
+4. Include relevant video links if applicable
+5. Format with Discord markdown (use **bold**, bullet points, numbered lists)
+6. If multiple issues match, address the most likely one first
+7. Be empathetic and reassuring about the situation
+
+Provide a helpful, empathetic response:"""
+
+        response = await claude_client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response_text = response.content[0].text
+        
+        # Add footer
+        footer = "\n\n💡 *If this doesn't resolve your issue, our staff team will assist you shortly.*"
+        full_response = response_text + footer
+        
+        await message.reply(full_response)
+        print(f"✅ Provided crisis support to {message.author.name}: {message.content[:50]}...")
+        
+    except Exception as e:
+        print(f"❌ Error providing crisis help: {e}")
+        # Fallback: escalate to staff
+        await escalate_to_staff(message)
+
+async def escalate_to_staff(message: discord.Message):
+    """Tag staff for non-crisis or complex issues"""
+    try:
+        # Extract brief context
+        user_issue = message.content[:100] + "..." if len(message.content) > 100 else message.content
+        
+        embed = discord.Embed(
+            title="🆘 Staff Assistance Needed",
+            description=f"{message.author.mention} needs help with an issue.",
+            color=0xFF6B6B
+        )
+        embed.add_field(
+            name="User Question",
+            value=f"*{user_issue}*",
+            inline=False
+        )
+        embed.add_field(
+            name="Reason",
+            value="Issue requires staff assistance.",
+            inline=False
+        )
+        
+        # Tag staff role (906704951202025475)
+        await message.reply(
+            content="<@&906704951202025475>",
+            embed=embed
+        )
+        
+        print(f"⚠️ Escalated to staff: {message.author.name} - {user_issue}")
+        
+    except Exception as e:
+        print(f"❌ Error escalating to staff: {e}")
+        # Simple fallback
+        try:
+            await message.reply("Hey <@&906704951202025475>, this user needs assistance! 👋")
+        except:
+            pass
 
 class BugTrackingConfig:
     def __init__(self):
@@ -2314,6 +2430,20 @@ class BetaTestingBot(commands.Bot):
             # Don't respond to ourselves or other bots
             if message.author == self.user or message.author.bot:
                 return
+            
+            # === CRISIS SUPPORT CHANNEL HANDLER ===
+            # Check if message is in designated support channel
+            if message.channel.id == SUPPORT_CHANNEL_ID:
+                # Only respond to questions or help requests
+                if '?' in message.content or 'help' in message.content.lower():
+                    # Check if crisis-related
+                    if is_crisis_related(message.content):
+                        # Handle crisis support
+                        await handle_crisis_support(message)
+                    else:
+                        # Escalate non-crisis issues to staff
+                        await escalate_to_staff(message)
+                return  # Don't process further for support channel
             
             # Handle DMs for ambassador submissions
             if isinstance(message.channel, discord.DMChannel):
