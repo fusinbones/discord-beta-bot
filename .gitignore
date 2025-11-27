@@ -7,6 +7,9 @@
 gen-lang-client-*.json
 *-service-account.json
 *.credentials.json
+config/google_service_account.json
+config/*.json
+!config/example.json
 
 # Python
 __pycache__/
