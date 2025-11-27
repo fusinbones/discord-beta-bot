@@ -2103,6 +2103,11 @@ class BetaTestingBot(commands.Bot):
         if hasattr(self, 'ambassador_program') and not self.ambassador_program.monthly_check.is_running():
             self.ambassador_program.monthly_check.start()
             print('✅ Ambassador Program monthly check task started')
+        
+        # Start Ambassador Program daily leaderboard task
+        if hasattr(self, 'ambassador_program') and not self.ambassador_program.daily_leaderboard_post.is_running():
+            self.ambassador_program.daily_leaderboard_post.start()
+            print('✅ Ambassador Program daily leaderboard task started')
             
         # Verify Ambassador Program Supabase connection
         if hasattr(self, 'ambassador_program'):
@@ -2530,14 +2535,9 @@ class BetaTestingBot(commands.Bot):
                 except Exception as e:
                     print(f"❌ Error checking ambassador status: {e}")
             
-            # Handle Ambassador Program category channels and specific ambassador channels
-            # Exclude beta-testing channels from ambassador point counting
-            elif message.guild and (
-                (message.channel.category and "ambassador program" in message.channel.category.name.lower()) or
-                message.channel.id == 1407762085214949437  # #sidekick-tools-ambassadors
-            ) and not (
-                message.channel.category and "beta" in message.channel.category.name.lower()
-            ):
+            # Handle Ambassador submissions - ONLY from the designated ambassador channel
+            # Locked to channel 1407762085214949437 (#sidekick-tools-ambassadors) for accuracy
+            elif message.guild and message.channel.id == 1407762085214949437:
                 try:
                     # Only process if message contains URLs or attachments (actual submissions)
                     import re
@@ -6572,6 +6572,49 @@ async def ambassador_recover(ctx, hours_back: int = 24):
     except Exception as e:
         await ctx.send(f"❌ Error during recovery: {e}")
 
+@bot.command(name='post-leaderboard')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def post_leaderboard_now(ctx):
+    """Manually post the daily leaderboard to the ambassador channel (Staff only)"""
+    try:
+        if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program:
+            await ctx.send("❌ Ambassador program not initialized.")
+            return
+        
+        await ctx.send("📊 Posting leaderboard to ambassador channel...")
+        await bot.ambassador_program.daily_leaderboard_post()
+        await ctx.send("✅ Leaderboard posted!")
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error posting leaderboard: {e}")
+
+@bot.command(name='ambassador-sheet')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def ambassador_sheet_link(ctx):
+    """View link to the Ambassador tracking Google Sheet (Staff only)"""
+    embed = discord.Embed(
+        title="📊 Ambassador Tracking Sheet",
+        description="Access the ambassador submission tracking system",
+        color=0x4285f4
+    )
+    embed.add_field(
+        name="🔗 Google Sheets Link",
+        value="[Open Ambassador Tracking Sheet](https://docs.google.com/spreadsheets/d/15j_SN4T22Eijzf-ImevBihgcwrQbGQcKPzKblTQHUzE/edit)",
+        inline=False
+    )
+    embed.add_field(
+        name="📝 Sheets Included",
+        value="• **Ambassadors** - Points, status, manual adjustments\n• **Submissions** - All submissions with timestamps",
+        inline=False
+    )
+    embed.add_field(
+        name="✏️ VA Edits",
+        value="Manual adjustments in column H are preserved. Bot will NOT overwrite VA edits.",
+        inline=False
+    )
+    embed.set_footer(text="Ambassador Tracking • Jim the Mentor")
+    await ctx.send(embed=embed)
+
 @bot.command(name='view-sheet')
 @commands.has_any_role('Staff', 'Admin', 'Moderator')
 async def view_sheet(ctx):
@@ -8052,6 +8095,48 @@ async def process_url_submission(message, ambassador_id, url):
         success = await bot.ambassador_program.store_submission(submission)
         
         if success:
+            # Sync to Google Sheets (VA-safe - won't overwrite manual edits)
+            try:
+                from ambassador_sheets_integration import AmbassadorSheetsManager, AmbassadorSheetsConfig
+                config = AmbassadorSheetsConfig()
+                sheets_manager = AmbassadorSheetsManager(
+                    spreadsheet_id=config.SPREADSHEET_ID,
+                    credentials_path=config.CREDENTIALS_PATH,
+                    supabase_client=bot.ambassador_program.supabase
+                )
+                
+                # Get ambassador username
+                amb_result = bot.ambassador_program.supabase.table('ambassadors').select('username', 'current_month_points', 'total_points').eq('discord_id', ambassador_id).execute()
+                amb_username = amb_result.data[0]['username'] if amb_result.data else 'Unknown'
+                current_pts = amb_result.data[0].get('current_month_points', 0) if amb_result.data else 0
+                total_pts = amb_result.data[0].get('total_points', 0) if amb_result.data else 0
+                
+                # Append submission to sheet
+                submission_data = {
+                    'ambassador_id': ambassador_id,
+                    'platform': platform.value if hasattr(platform, 'value') else str(platform),
+                    'post_type': post_type.value if hasattr(post_type, 'value') else str(post_type),
+                    'url': url,
+                    'points_awarded': points,
+                    'timestamp': datetime.now().isoformat(),
+                    'validity_status': validity_status,
+                    'message_id': str(message.id),
+                    'notes': message.content[:100] if message.content else ''
+                }
+                await sheets_manager.append_submission_va_safe(submission_data, amb_username)
+                
+                # Update ambassador points in sheet
+                submissions_count = len(bot.ambassador_program.supabase.table('submissions').select('id').eq('ambassador_id', ambassador_id).execute().data)
+                await sheets_manager.update_ambassador_points_va_safe(
+                    ambassador_id, amb_username, current_pts + points, total_pts + points, submissions_count
+                )
+                print(f"✅ Synced submission to Google Sheets for {amb_username}")
+            except Exception as sheet_error:
+                print(f"⚠️ Failed to sync to Google Sheets: {sheet_error}")
+            
+            # Update points in Supabase
+            await bot.ambassador_program.update_ambassador_points(ambassador_id, points)
+            
             embed = discord.Embed(
                 title="✅ Submission Accepted!",
                 description=f"Your {platform.value.title()} {post_type.value.replace('_', ' ')} has been processed.",
@@ -8059,7 +8144,7 @@ async def process_url_submission(message, ambassador_id, url):
             )
             embed.add_field(name="🎯 Points Awarded", value=f"{points} points", inline=True)
             embed.add_field(name="🔗 URL", value=url, inline=False)
-            embed.add_field(name="💡 Note", value="Engagement metrics will be updated when available", inline=False)
+            embed.add_field(name="📊 Synced", value="✅ Recorded to tracking sheet", inline=True)
             
             await message.reply(embed=embed)
         else:
@@ -8246,6 +8331,50 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
         success = await bot.ambassador_program.store_submission(submission)
         
         if success:
+            # Sync to Google Sheets (VA-safe - won't overwrite manual edits)
+            try:
+                from ambassador_sheets_integration import AmbassadorSheetsManager, AmbassadorSheetsConfig
+                config = AmbassadorSheetsConfig()
+                sheets_manager = AmbassadorSheetsManager(
+                    spreadsheet_id=config.SPREADSHEET_ID,
+                    credentials_path=config.CREDENTIALS_PATH,
+                    supabase_client=bot.ambassador_program.supabase
+                )
+                
+                # Get ambassador username
+                amb_result = bot.ambassador_program.supabase.table('ambassadors').select('username', 'current_month_points', 'total_points').eq('discord_id', ambassador_id).execute()
+                amb_username = amb_result.data[0]['username'] if amb_result.data else 'Unknown'
+                current_pts = amb_result.data[0].get('current_month_points', 0) if amb_result.data else 0
+                total_pts = amb_result.data[0].get('total_points', 0) if amb_result.data else 0
+                
+                # Append submission to sheet
+                submission_data = {
+                    'ambassador_id': ambassador_id,
+                    'platform': platform.value if hasattr(platform, 'value') else str(platform),
+                    'post_type': post_type.value if hasattr(post_type, 'value') else str(post_type),
+                    'url': '',
+                    'points_awarded': points,
+                    'timestamp': datetime.now().isoformat(),
+                    'validity_status': validity_status,
+                    'screenshot_hash': content_hash,
+                    'message_id': str(message.id),
+                    'notes': analysis.get('content_preview', message.content[:100] if message.content else '')
+                }
+                await sheets_manager.append_submission_va_safe(submission_data, amb_username)
+                
+                # Update ambassador points in sheet
+                submissions_count = len(bot.ambassador_program.supabase.table('submissions').select('id').eq('ambassador_id', ambassador_id).execute().data)
+                await sheets_manager.update_ambassador_points_va_safe(
+                    ambassador_id, amb_username, current_pts + points, total_pts + points, submissions_count
+                )
+                print(f"✅ Synced screenshot submission to Google Sheets for {amb_username}")
+            except Exception as sheet_error:
+                print(f"⚠️ Failed to sync to Google Sheets: {sheet_error}")
+            
+            # Update points in Supabase
+            if validity_status == "accepted":
+                await bot.ambassador_program.update_ambassador_points(ambassador_id, points)
+            
             if validity_status == "accepted":
                 embed = discord.Embed(
                     title="✅ Screenshot Analyzed & Accepted!",
@@ -8254,7 +8383,7 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
                 )
                 embed.add_field(name="🎯 Points Awarded", value=f"{points} points", inline=True)
                 embed.add_field(name="📊 Engagement", value=f"👍 {engagement.likes} | 💬 {engagement.comments} | 🔄 {engagement.shares}", inline=True)
-                embed.add_field(name="🤖 AI Analysis", value=analysis.get('content_preview', 'Content analyzed'), inline=False)
+                embed.add_field(name="📊 Synced", value="✅ Recorded to tracking sheet", inline=True)
             else:
                 embed = discord.Embed(
                     title="⚠️ Submission Flagged",
@@ -8263,6 +8392,7 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
                 )
                 embed.add_field(name="🔍 Reason", value="Quality or authenticity concerns detected", inline=False)
                 embed.add_field(name="📝 Next Steps", value="Staff will review and award points if valid", inline=False)
+                embed.add_field(name="📊 Synced", value="✅ Recorded to tracking sheet for review", inline=True)
             
             await message.reply(embed=embed)
         else:
@@ -8280,36 +8410,90 @@ async def process_screenshot_submission(message, ambassador_id, screenshot):
             await message.reply("❌ Error processing your screenshot submission. Please try again later.")
 
 def detect_platform_from_url(url):
-    """Detect platform and post type from URL - only award points for valid platforms"""
+    """Detect platform and post type from URL - updated with new PostType enums"""
     url_lower = url.lower()
     
-    # Valid platforms that earn points
+    # YouTube (15 pts for videos/shorts)
     if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
-        return Platform.YOUTUBE, PostType.YOUTUBE_VIDEO
+        if '/shorts/' in url_lower:
+            return Platform.YOUTUBE, PostType.YOUTUBE_SHORTS
+        elif '/community' in url_lower or '/post/' in url_lower:
+            return Platform.YOUTUBE, PostType.YOUTUBE_POST
+        else:
+            return Platform.YOUTUBE, PostType.YOUTUBE_VIDEO
+    
+    # TikTok (15 pts for videos)
     elif 'tiktok.com' in url_lower:
         return Platform.TIKTOK, PostType.TIKTOK_VIDEO
+    
+    # Instagram (8 pts for reels/posts, 3 pts for stories)
     elif 'instagram.com' in url_lower:
         if '/reel/' in url_lower:
-            return Platform.INSTAGRAM, PostType.INSTAGRAM_REEL
+            return Platform.INSTAGRAM, PostType.IG_REEL
+        elif '/stories/' in url_lower:
+            return Platform.INSTAGRAM, PostType.IG_STORY
         else:
-            return Platform.INSTAGRAM, PostType.INSTAGRAM_POST
+            return Platform.INSTAGRAM, PostType.IG_POST
+    
+    # Facebook (10 pts for group posts, 8 pts for regular posts/videos)
     elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
-        return Platform.FACEBOOK, PostType.FB_GROUP_POST
+        if '/groups/' in url_lower:
+            return Platform.FACEBOOK, PostType.FB_GROUP_POST
+        elif '/reel/' in url_lower:
+            return Platform.FACEBOOK, PostType.FB_REEL
+        elif '/videos/' in url_lower or '/watch/' in url_lower:
+            return Platform.FACEBOOK, PostType.FB_VIDEO
+        elif '/stories/' in url_lower:
+            return Platform.FACEBOOK, PostType.FB_STORY
+        else:
+            return Platform.FACEBOOK, PostType.FB_POST
+    
+    # Twitter/X (6 pts)
     elif 'twitter.com' in url_lower or 'x.com' in url_lower:
-        return Platform.TWITTER, PostType.TWEET
+        return Platform.TWITTER, PostType.TWITTER_POST
+    
+    # Reddit (12 pts)
     elif 'reddit.com' in url_lower:
-        return Platform.REDDIT, PostType.REDDIT_ANSWER
+        if '/comments/' in url_lower:
+            return Platform.REDDIT, PostType.REDDIT_ANSWER
+        else:
+            return Platform.REDDIT, PostType.REDDIT_POST
+    
+    # Quora (12 pts)
     elif 'quora.com' in url_lower:
         return Platform.QUORA, PostType.QUORA_ANSWER
-    elif 'linkedin.com' in url_lower:
-        return Platform.LINKEDIN, PostType.INSTAGRAM_POST  # Use generic post type
+    
+    # Threads (6 pts)
+    elif 'threads.net' in url_lower:
+        return Platform.THREADS, PostType.THREADS_POST
+    
+    # Pinterest (6 pts) - NOW VALID
+    elif 'pinterest.com' in url_lower or 'pin.it' in url_lower:
+        return Platform.PINTEREST, PostType.PINTEREST_POST
+    
+    # Poshmark (3-10 pts)
+    elif 'poshmark.com' in url_lower:
+        if '/show/' in url_lower or '/live/' in url_lower:
+            return Platform.POSHMARK, PostType.POSHMARK_SHOW
+        else:
+            return Platform.POSHMARK, PostType.POSHMARK_LISTING
+    
+    # Truth Social (6 pts)
+    elif 'truthsocial.com' in url_lower:
+        return Platform.TRUTH, PostType.TRUTH_POST
+    
+    # Telegram (3 pts)
+    elif 'telegram.org' in url_lower or 't.me' in url_lower:
+        return Platform.TELEGRAM, PostType.TELEGRAM_STORY
+    
+    # Lemon8 (6 pts)
+    elif 'lemon8' in url_lower:
+        return Platform.LEMON8, PostType.LEMON8_POST
     
     # Invalid platforms that don't earn points
     elif any(invalid in url_lower for invalid in [
-        'pinterest.com', 'pin.it',  # Pinterest
         'snapchat.com',             # Snapchat
         'discord.com', 'discord.gg', # Discord
-        'telegram.org', 't.me',     # Telegram
         'whatsapp.com',             # WhatsApp
         'tumblr.com',               # Tumblr
         'twitch.tv',                # Twitch
@@ -8321,9 +8505,9 @@ def detect_platform_from_url(url):
     ]):
         return None, None  # Return None for invalid platforms
     
-    # Unknown platform - don't default to Instagram
+    # Unknown platform - flag for review
     else:
-        return None, None
+        return Platform.UNKNOWN, PostType.UNKNOWN
 
 if __name__ == "__main__":
     # Load environment variables

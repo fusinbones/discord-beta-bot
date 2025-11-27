@@ -745,14 +745,255 @@ class AmbassadorSheetsManager:
             logging.error(f"Error creating submissions sheet: {e}")
             return False
 
+    # ============================================
+    # VA-SAFE METHODS - Preserve manual edits
+    # ============================================
+    
+    async def get_existing_sheet_data(self, sheet_name: str, range_spec: str) -> List[List]:
+        """Read existing data from sheet without modifying it"""
+        try:
+            token = await self.get_access_token()
+            if not token:
+                return []
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{sheet_name}!{range_spec}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get('values', [])
+                    else:
+                        logging.warning(f"Could not read {sheet_name}: {response.status}")
+                        return []
+                        
+        except Exception as e:
+            logging.error(f"Error reading sheet data: {e}")
+            return []
+    
+    async def append_submission_va_safe(self, submission_data: dict, username: str) -> bool:
+        """
+        Append a single submission to the sheet WITHOUT overwriting VA edits.
+        This method:
+        1. Reads existing data to find next empty row
+        2. Checks if submission already exists (by message_id or screenshot_hash)
+        3. Only appends if not duplicate
+        """
+        try:
+            token = await self.get_access_token()
+            if not token:
+                return False
+            
+            # First, ensure the Submissions sheet exists with headers
+            await self.create_submissions_sheet()
+            
+            # Read existing submissions to check for duplicates and find next row
+            existing_data = await self.get_existing_sheet_data("Submissions", "A:L")
+            
+            # If no data, add headers first
+            if not existing_data:
+                await self.add_submissions_headers()
+                next_row = 2
+            else:
+                next_row = len(existing_data) + 1
+                
+                # Check for duplicate by message_id or screenshot_hash
+                message_id = str(submission_data.get('message_id', ''))
+                screenshot_hash = submission_data.get('screenshot_hash', '')
+                
+                for row in existing_data[1:]:  # Skip header
+                    if len(row) >= 11:
+                        existing_msg_id = str(row[10]) if len(row) > 10 else ''
+                        existing_hash = str(row[9]) if len(row) > 9 else ''
+                        
+                        if message_id and existing_msg_id == message_id:
+                            logging.info(f"Submission already exists (message_id: {message_id})")
+                            return True  # Already exists, not an error
+                        if screenshot_hash and existing_hash == screenshot_hash:
+                            logging.info(f"Submission already exists (hash: {screenshot_hash})")
+                            return True
+            
+            # Prepare row data
+            row_data = [
+                str(submission_data.get('id', '')),
+                str(submission_data.get('ambassador_id', '')),
+                username,
+                submission_data.get('platform', ''),
+                submission_data.get('post_type', ''),
+                submission_data.get('url', ''),
+                submission_data.get('points_awarded', 0),
+                submission_data.get('timestamp', ''),
+                submission_data.get('validity_status', 'pending'),
+                submission_data.get('screenshot_hash', ''),
+                str(submission_data.get('message_id', '')),
+                submission_data.get('notes', '')
+            ]
+            
+            # Append to sheet
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            range_name = f"Submissions!A{next_row}:L{next_row}"
+            body = {"values": [row_data]}
+            
+            url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+            params = {"valueInputOption": "USER_ENTERED"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.put(url, headers=headers, params=params, json=body) as response:
+                    if response.status == 200:
+                        logging.info(f"✅ Appended submission to row {next_row}")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logging.error(f"Failed to append submission: {error_text}")
+                        return False
+                        
+        except Exception as e:
+            logging.error(f"Error appending submission: {e}")
+            return False
+    
+    async def update_ambassador_points_va_safe(self, discord_id: str, username: str, 
+                                                current_points: int, total_points: int,
+                                                submissions_count: int) -> bool:
+        """
+        Update ambassador points in sheet WITHOUT overwriting VA manual adjustments.
+        This method:
+        1. Reads existing data to find the ambassador row
+        2. Preserves columns H (Manual Adjustments) and I (Notes)
+        3. Only updates points columns
+        """
+        try:
+            token = await self.get_access_token()
+            if not token:
+                return False
+            
+            # Ensure Ambassadors sheet exists
+            await self.create_ambassador_sheet()
+            
+            # Read existing data
+            existing_data = await self.get_existing_sheet_data("Ambassadors", "A:I")
+            
+            # If no data, add headers and this ambassador
+            if not existing_data:
+                await self.add_ambassador_headers()
+                row_num = 2
+                manual_adjustment = ""
+                notes = ""
+            else:
+                # Find ambassador row by discord_id
+                row_num = None
+                manual_adjustment = ""
+                notes = ""
+                
+                for i, row in enumerate(existing_data[1:], start=2):  # Skip header
+                    if len(row) > 0 and str(row[0]) == str(discord_id):
+                        row_num = i
+                        # Preserve VA edits
+                        manual_adjustment = row[7] if len(row) > 7 else ""
+                        notes = row[8] if len(row) > 8 else ""
+                        break
+                
+                if row_num is None:
+                    # New ambassador, append at end
+                    row_num = len(existing_data) + 1
+            
+            # Prepare row data (preserving manual adjustments and notes)
+            row_data = [
+                str(discord_id),
+                username,
+                current_points,
+                total_points,
+                submissions_count,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Active",
+                manual_adjustment,  # Preserve VA manual adjustments
+                notes  # Preserve VA notes
+            ]
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            range_name = f"Ambassadors!A{row_num}:I{row_num}"
+            body = {"values": [row_data]}
+            
+            url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+            params = {"valueInputOption": "USER_ENTERED"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.put(url, headers=headers, params=params, json=body) as response:
+                    if response.status == 200:
+                        logging.info(f"✅ Updated ambassador {username} at row {row_num}")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logging.error(f"Failed to update ambassador: {error_text}")
+                        return False
+                        
+        except Exception as e:
+            logging.error(f"Error updating ambassador: {e}")
+            return False
+    
+    async def get_leaderboard_data(self, limit: int = 10) -> List[dict]:
+        """Get leaderboard data from sheet (respects VA manual adjustments)"""
+        try:
+            existing_data = await self.get_existing_sheet_data("Ambassadors", "A:I")
+            
+            if not existing_data or len(existing_data) < 2:
+                return []
+            
+            leaderboard = []
+            for row in existing_data[1:]:  # Skip header
+                if len(row) >= 4:
+                    discord_id = row[0]
+                    username = row[1]
+                    current_points = int(row[2]) if row[2] else 0
+                    total_points = int(row[3]) if row[3] else 0
+                    
+                    # Apply manual adjustment if present
+                    if len(row) > 7 and row[7]:
+                        try:
+                            adjustment = int(row[7])
+                            current_points += adjustment
+                        except ValueError:
+                            pass
+                    
+                    leaderboard.append({
+                        'discord_id': discord_id,
+                        'username': username,
+                        'current_month_points': current_points,
+                        'total_points': total_points
+                    })
+            
+            # Sort by current month points descending
+            leaderboard.sort(key=lambda x: x['current_month_points'], reverse=True)
+            
+            return leaderboard[:limit]
+            
+        except Exception as e:
+            logging.error(f"Error getting leaderboard: {e}")
+            return []
+
 
 class AmbassadorSheetsConfig:
     """Configuration for ambassador sheets integration"""
     
-    # Use the provided ambassador sheet ID
-    SPREADSHEET_ID = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
+    # NEW Ambassador tracking sheet (separate from beta testers)
+    SPREADSHEET_ID = os.getenv('AMBASSADOR_SPREADSHEET_ID', '15j_SN4T22Eijzf-ImevBihgcwrQbGQcKPzKblTQHUzE')
     CREDENTIALS_PATH = 'config/google_service_account.json'  # Path to credentials
     SYNC_INTERVAL_HOURS = 6  # How often to sync (hours)
+    
+    # Ambassador channel ID (only process submissions from this channel)
+    AMBASSADOR_CHANNEL_ID = 1407762085214949437
 
 
 async def test_ambassador_sheets():

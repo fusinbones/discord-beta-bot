@@ -32,16 +32,82 @@ load_dotenv()
 from google_docs_integration import GoogleDocsManager, AmbassadorReportingSystem, AmbassadorDocsConfig
 
 class PostType(Enum):
-    YOUTUBE_VIDEO = "youtube_tiktok_video"
-    TIKTOK_VIDEO = "youtube_tiktok_video"
-    QUORA_ANSWER = "quora_reddit_answer"
-    REDDIT_ANSWER = "quora_reddit_answer"
+    # Instagram
+    IG_REEL = "ig_reel"
+    IG_POST = "ig_post"
+    IG_STORY = "ig_story"
+    IG_COMMENT = "ig_comment"
+    IG_HIGHLIGHTS = "ig_highlights"
+    
+    # Facebook
     FB_GROUP_POST = "fb_group_post"
-    INSTAGRAM_REEL = "instagram_reel_post"
-    INSTAGRAM_POST = "instagram_reel_post"
-    TWEET = "tweet_threads_post"
-    THREAD = "tweet_threads_post"
-    STORY = "story"
+    FB_GROUP_COMMENT = "fb_group_comment"
+    FB_REEL = "fb_reel"
+    FB_POST = "fb_post"
+    FB_VIDEO = "fb_video"
+    FB_ADS_RECO = "fb_ads_reco"
+    FB_ADS_COMMENT = "fb_ads_comment"
+    FB_STORY = "fb_story"
+    
+    # TikTok
+    TIKTOK_VIDEO = "tiktok_video"
+    TIKTOK_STORY = "tiktok_story"
+    TIKTOK_POST = "tiktok_post"
+    
+    # YouTube
+    YOUTUBE_POST = "youtube_post"
+    YOUTUBE_SHORTS = "youtube_shorts"
+    YOUTUBE_REEL = "youtube_reel"
+    YOUTUBE_VIDEO = "youtube_video"
+    YOUTUBE_COMMENT = "youtube_comment"
+    
+    # Poshmark
+    POSHMARK_LISTING = "poshmark_listing"
+    POSHMARK_SHOW = "poshmark_show"
+    
+    # Reddit
+    REDDIT_POST = "reddit_post"
+    REDDIT_ANSWER = "reddit_answer"
+    
+    # Quora
+    QUORA_POST = "quora_post"
+    QUORA_ANSWER = "quora_answer"
+    
+    # Twitter/X
+    TWITTER_POST = "twitter_post"
+    
+    # Threads
+    THREADS_POST = "threads_post"
+    
+    # Pinterest
+    PINTEREST_POST = "pinterest_post"
+    
+    # Other platforms
+    TRUTH_POST = "truth_post"
+    TELEGRAM_STORY = "telegram_story"
+    LEMON8_POST = "lemon8_post"
+    CHAT_MESSAGE = "chat_message"
+    
+    # Reposts/Crossposts
+    REPOST_FB_REEL = "repost_fb_reel"
+    REPOST_IG_REEL = "repost_ig_reel"
+    REPOST_TIKTOK_VIDEO = "repost_tiktok_video"
+    REPOST_TIKTOK_STORY = "repost_tiktok_story"
+    REPOST_THREADS = "repost_threads"
+    REPOST_FB_STORY = "repost_fb_story"
+    REPOST_PINTEREST = "repost_pinterest"
+    REPOST_YOUTUBE_SHORTS = "repost_youtube_shorts"
+    REPOST_TWITTER = "repost_twitter"
+    REPOST_IG_STORY = "repost_ig_story"
+    REPOST_YOUTUBE_POST = "repost_youtube_post"
+    REPOST_FB_GROUP = "repost_fb_group"
+    REPOST_TIKTOK_POST = "repost_tiktok_post"
+    
+    # Bonus
+    CONSISTENCY_BONUS = "consistency_bonus"
+    
+    # Legacy/fallback
+    UNKNOWN = "unknown"
 
 class Platform(Enum):
     YOUTUBE = "youtube"
@@ -51,7 +117,13 @@ class Platform(Enum):
     FACEBOOK = "facebook"
     INSTAGRAM = "instagram"
     TWITTER = "twitter"
-    LINKEDIN = "linkedin"
+    THREADS = "threads"
+    PINTEREST = "pinterest"
+    POSHMARK = "poshmark"
+    TRUTH = "truth"
+    TELEGRAM = "telegram"
+    LEMON8 = "lemon8"
+    UNKNOWN = "unknown"
 
 @dataclass
 class EngagementMetrics:
@@ -100,22 +172,91 @@ class AmbassadorProgram:
             genai.configure(api_key=self.gemini_api_key)
             self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # Scoring system configuration
+        # Scoring system configuration - Updated points from official list
         self.base_points = {
-            PostType.YOUTUBE_VIDEO: 15,
-            PostType.TIKTOK_VIDEO: 15,
-            PostType.QUORA_ANSWER: 12,
-            PostType.REDDIT_ANSWER: 12,
+            # Instagram (8 pts for posts/reels/comments, 3 pts for stories/highlights)
+            PostType.IG_REEL: 8,
+            PostType.IG_POST: 8,
+            PostType.IG_STORY: 3,
+            PostType.IG_COMMENT: 8,
+            PostType.IG_HIGHLIGHTS: 3,
+            
+            # Facebook (10 pts for group posts/comments, 8 pts for reels/posts/videos, 3 pts for stories/ads)
             PostType.FB_GROUP_POST: 10,
-            PostType.INSTAGRAM_REEL: 8,
-            PostType.INSTAGRAM_POST: 8,
-            PostType.TWEET: 6,
-            PostType.THREAD: 6,
-            PostType.STORY: 3
+            PostType.FB_GROUP_COMMENT: 10,
+            PostType.FB_REEL: 8,
+            PostType.FB_POST: 8,
+            PostType.FB_VIDEO: 8,
+            PostType.FB_ADS_RECO: 3,
+            PostType.FB_ADS_COMMENT: 3,
+            PostType.FB_STORY: 3,
+            
+            # TikTok (15 pts for videos, 6 pts for posts, 3 pts for stories)
+            PostType.TIKTOK_VIDEO: 15,
+            PostType.TIKTOK_STORY: 3,
+            PostType.TIKTOK_POST: 6,
+            
+            # YouTube (15 pts for videos/shorts/reels, 6 pts for posts, 8 pts for comments)
+            PostType.YOUTUBE_POST: 6,
+            PostType.YOUTUBE_SHORTS: 15,
+            PostType.YOUTUBE_REEL: 15,
+            PostType.YOUTUBE_VIDEO: 15,
+            PostType.YOUTUBE_COMMENT: 8,
+            
+            # Poshmark (3 pts for listings, 10 pts for shows/lives)
+            PostType.POSHMARK_LISTING: 3,
+            PostType.POSHMARK_SHOW: 10,
+            
+            # Reddit (12 pts)
+            PostType.REDDIT_POST: 12,
+            PostType.REDDIT_ANSWER: 12,
+            
+            # Quora (12 pts)
+            PostType.QUORA_POST: 12,
+            PostType.QUORA_ANSWER: 12,
+            
+            # Twitter/X (6 pts)
+            PostType.TWITTER_POST: 6,
+            
+            # Threads (6 pts)
+            PostType.THREADS_POST: 6,
+            
+            # Pinterest (6 pts)
+            PostType.PINTEREST_POST: 6,
+            
+            # Other platforms
+            PostType.TRUTH_POST: 6,
+            PostType.TELEGRAM_STORY: 3,
+            PostType.LEMON8_POST: 6,  # Default to 6, adjust if needed
+            PostType.CHAT_MESSAGE: 3,
+            
+            # Reposts/Crossposts (reduced points)
+            PostType.REPOST_FB_REEL: 4,
+            PostType.REPOST_IG_REEL: 4,
+            PostType.REPOST_TIKTOK_VIDEO: 7.5,
+            PostType.REPOST_TIKTOK_STORY: 1.5,
+            PostType.REPOST_THREADS: 3,
+            PostType.REPOST_FB_STORY: 1.5,
+            PostType.REPOST_PINTEREST: 3,
+            PostType.REPOST_YOUTUBE_SHORTS: 7.5,
+            PostType.REPOST_TWITTER: 3,
+            PostType.REPOST_IG_STORY: 1.5,
+            PostType.REPOST_YOUTUBE_POST: 3,
+            PostType.REPOST_FB_GROUP: 5,
+            PostType.REPOST_TIKTOK_POST: 3,
+            
+            # Bonus
+            PostType.CONSISTENCY_BONUS: 10,
+            
+            # Unknown/fallback
+            PostType.UNKNOWN: 0,
         }
         
-        # Weekly streak bonus
+        # Consistency bonus (weekly streak)
         self.weekly_streak_bonus = 10
+        
+        # Ambassador submission channel (ONLY process submissions from this channel)
+        self.ambassador_channel_id = 1407762085214949437
         
         # Initialize Google Docs integration
         self.docs_config = AmbassadorDocsConfig()
@@ -409,6 +550,98 @@ class AmbassadorProgram:
         # Check if it's end of month (last day)
         if now.day == (now.replace(month=now.month + 1, day=1) - timedelta(days=1)).day:
             await self.generate_monthly_reports()
+    
+    @tasks.loop(hours=24)
+    async def daily_leaderboard_post(self):
+        """Post daily leaderboard to ambassador channel"""
+        try:
+            # Get the ambassador channel
+            channel = self.bot.get_channel(self.ambassador_channel_id)
+            if not channel:
+                print(f"⚠️ Ambassador channel {self.ambassador_channel_id} not found")
+                return
+            
+            # Get leaderboard data from Supabase
+            if not self.supabase:
+                print("⚠️ Supabase not available for leaderboard")
+                return
+            
+            result = self.supabase.table('ambassadors').select(
+                'discord_id', 'username', 'current_month_points', 'total_points', 'consecutive_months'
+            ).eq('status', 'active').order('current_month_points', desc=True).limit(10).execute()
+            
+            ambassadors = result.data
+            
+            if not ambassadors:
+                print("⚠️ No ambassadors found for leaderboard")
+                return
+            
+            # Build leaderboard embed
+            now = datetime.now()
+            embed = discord.Embed(
+                title="🏆 Daily Ambassador Leaderboard",
+                description=f"**{now.strftime('%B %Y')}** Rankings\nUpdated: {now.strftime('%m/%d/%Y %I:%M %p')}",
+                color=0xffd700
+            )
+            
+            leaderboard_text = ""
+            for i, amb in enumerate(ambassadors, 1):
+                # Rank emoji
+                if i == 1:
+                    rank = "🥇"
+                elif i == 2:
+                    rank = "🥈"
+                elif i == 3:
+                    rank = "🥉"
+                else:
+                    rank = f"**{i}.**"
+                
+                username = amb['username']
+                points = amb['current_month_points'] or 0
+                streak = amb.get('consecutive_months', 0) or 0
+                
+                # Goal indicator
+                if points >= 75:
+                    status = "✅"
+                elif points >= 50:
+                    status = "🔥"
+                else:
+                    status = "📈"
+                
+                streak_text = f" 🔥{streak}mo" if streak > 0 else ""
+                leaderboard_text += f"{rank} {status} **{username}** — {points} pts{streak_text}\n"
+            
+            embed.add_field(
+                name="📊 This Month's Top Performers",
+                value=leaderboard_text or "No submissions yet!",
+                inline=False
+            )
+            
+            # Add point reference
+            embed.add_field(
+                name="💡 Top Point Earners",
+                value="🎥 TikTok/YouTube Video: **15 pts**\n📱 Reddit/Quora: **12 pts**\n👥 FB Group Post: **10 pts**\n📸 IG Reel/Post: **8 pts**",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🎯 Monthly Goal",
+                value="Reach **75 points** to maintain ambassador status!\n\n✅ = Goal reached\n🔥 = Almost there\n📈 = Keep going!",
+                inline=True
+            )
+            
+            embed.set_footer(text="Submit your content with a screenshot + URL for points! • Jim the Mentor")
+            
+            await channel.send(embed=embed)
+            print(f"✅ Posted daily leaderboard to #{channel.name}")
+            
+        except Exception as e:
+            print(f"❌ Error posting daily leaderboard: {e}")
+    
+    @daily_leaderboard_post.before_loop
+    async def before_daily_leaderboard(self):
+        """Wait until bot is ready before starting leaderboard task"""
+        await self.bot.wait_until_ready()
     
     async def send_midmonth_reminders(self):
         """Send encouraging reminders to ambassadors behind pace"""
