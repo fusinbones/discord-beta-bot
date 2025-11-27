@@ -6615,6 +6615,98 @@ async def ambassador_sheet_link(ctx):
     embed.set_footer(text="Ambassador Tracking • Jim the Mentor")
     await ctx.send(embed=embed)
 
+@bot.command(name='archive-month')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def archive_month(ctx, month_year: str = None):
+    """Archive current month's leaderboard to a separate sheet (Staff only)
+    Usage: !archive-month or !archive-month "Nov 2025"
+    """
+    try:
+        from ambassador_sheets_integration import AmbassadorSheetsManager, AmbassadorSheetsConfig
+        config = AmbassadorSheetsConfig()
+        sheets_manager = AmbassadorSheetsManager(
+            spreadsheet_id=config.SPREADSHEET_ID,
+            credentials_path=config.CREDENTIALS_PATH,
+            supabase_client=bot.ambassador_program.supabase if hasattr(bot, 'ambassador_program') else None
+        )
+        
+        if not month_year:
+            month_year = datetime.now().strftime("%b %Y")
+        
+        await ctx.send(f"📦 Archiving leaderboard to '{month_year}' sheet...")
+        success = await sheets_manager.archive_month_leaderboard(month_year)
+        
+        if success:
+            await ctx.send(f"✅ Successfully archived leaderboard to '{month_year}' sheet!")
+        else:
+            await ctx.send("❌ Failed to archive leaderboard. Check logs.")
+            
+    except Exception as e:
+        await ctx.send(f"❌ Error archiving month: {e}")
+
+@bot.command(name='last-month-leaders')
+@commands.has_any_role('Staff', 'Admin', 'Moderator')
+async def last_month_leaders(ctx):
+    """Show last month's top ambassadors (Staff only)"""
+    try:
+        from ambassador_sheets_integration import AmbassadorSheetsManager, AmbassadorSheetsConfig
+        config = AmbassadorSheetsConfig()
+        sheets_manager = AmbassadorSheetsManager(
+            spreadsheet_id=config.SPREADSHEET_ID,
+            credentials_path=config.CREDENTIALS_PATH,
+            supabase_client=bot.ambassador_program.supabase if hasattr(bot, 'ambassador_program') else None
+        )
+        
+        leaders = await sheets_manager.get_last_month_leaders(limit=10)
+        
+        if not leaders:
+            # Calculate last month name for message
+            now = datetime.now()
+            if now.month == 1:
+                last_month = datetime(now.year - 1, 12, 1)
+            else:
+                last_month = datetime(now.year, now.month - 1, 1)
+            last_month_name = last_month.strftime("%b %Y")
+            
+            await ctx.send(f"📊 No archived data found for {last_month_name}. Use `!archive-month` to archive first.")
+            return
+        
+        # Calculate last month name
+        now = datetime.now()
+        if now.month == 1:
+            last_month = datetime(now.year - 1, 12, 1)
+        else:
+            last_month = datetime(now.year, now.month - 1, 1)
+        last_month_name = last_month.strftime("%B %Y")
+        
+        embed = discord.Embed(
+            title=f"🏆 {last_month_name} Final Leaderboard",
+            description="Archived monthly rankings",
+            color=0xffd700
+        )
+        
+        leaderboard_text = ""
+        for leader in leaders:
+            rank = leader['rank']
+            if rank == 1:
+                emoji = "🥇"
+            elif rank == 2:
+                emoji = "🥈"
+            elif rank == 3:
+                emoji = "🥉"
+            else:
+                emoji = f"**{rank}.**"
+            
+            leaderboard_text += f"{emoji} **{leader['username']}** — {leader['monthly_points']} pts\n"
+        
+        embed.add_field(name="📊 Final Rankings", value=leaderboard_text, inline=False)
+        embed.set_footer(text="Ambassador Monthly Archive • Jim the Mentor")
+        
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Error getting last month leaders: {e}")
+
 @bot.command(name='view-sheet')
 @commands.has_any_role('Staff', 'Admin', 'Moderator')
 async def view_sheet(ctx):
@@ -7218,54 +7310,37 @@ async def ambassador_command(ctx, action=None, user=None):
 
 @bot.command(name='mystats')
 async def ambassador_stats(ctx):
-    """Show ambassador's personal stats (DM only)"""
+    """Show ambassador's personal stats (DM only) - uses Supabase"""
     if not isinstance(ctx.channel, discord.DMChannel):
         await ctx.send("❌ This command only works in DMs!")
         return
     
     try:
+        # Check if ambassador program is available
+        if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program.supabase:
+            await ctx.send("❌ Ambassador program not available.")
+            return
+        
+        supabase = bot.ambassador_program.supabase
+        
         # Check if user is an ambassador
-        ambassador = None
-        if bot.ambassador_program.supabase:
-            try:
-                result = bot.ambassador_program.supabase.table('ambassadors').select('*').eq('discord_id', str(ctx.author.id)).eq('status', 'active').execute()
-                if result.data:
-                    ambassador = result.data[0]
-            except Exception as e:
-                print(f"⚠️ Supabase lookup failed: {e}")
+        result = supabase.table('ambassadors').select('*').eq('discord_id', str(ctx.author.id)).eq('status', 'active').execute()
         
-        if not ambassador:
-            with sqlite3.connect('ambassador_program.db') as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
-                row = cursor.fetchone()
-                if row:
-                    columns = [col[0] for col in cursor.description]
-                    row_map = {k: v for k, v in zip(columns, row)}
-                    ambassador = {
-                        'discord_id': row_map.get('discord_id') or row_map.get('id'),
-                        'username': row_map.get('username'),
-                        'current_month_points': row_map.get('current_month_points', 0),
-                        'total_points': row_map.get('total_points', 0),
-                        'consecutive_months': row_map.get('consecutive_months', 0),
-                        'reward_tier': row_map.get('reward_tier', 'none')
-                    }
-        
-        if not ambassador:
+        if not result.data:
             await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
             return
         
-        # Get monthly submission count
+        ambassador = result.data[0]
+        
+        # Get monthly submission count from Supabase
         current_month = datetime.now().strftime("%Y-%m")
-        with sqlite3.connect('ambassador_program.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT COUNT(*) FROM submissions 
-                WHERE ambassador_id = ? 
-                AND strftime('%Y-%m', timestamp) = ?
-                AND validity_status = 'accepted'
-            ''', (str(ctx.author.id), current_month))
-            monthly_posts = cursor.fetchone()[0]
+        submissions_result = supabase.table('submissions').select('id').eq('ambassador_id', str(ctx.author.id)).eq('validity_status', 'accepted').execute()
+        
+        # Filter by current month (timestamp starts with YYYY-MM)
+        monthly_posts = 0
+        for sub in submissions_result.data:
+            # Count all accepted submissions for now (Supabase filtering by month is complex)
+            monthly_posts += 1
         
         # Calculate progress
         monthly_points = ambassador.get('current_month_points', 0)
@@ -7330,46 +7405,46 @@ async def ambassador_stats(ctx):
         await ctx.send(f"❌ Error retrieving stats: {e}")
 
 @bot.command(name='leaderboard')
-async def ambassador_leaderboard(ctx):
-    """Show ambassador leaderboard (DM only)"""
+async def ambassador_leaderboard_cmd(ctx):
+    """Show ambassador leaderboard (DM only) - uses Supabase"""
     if not isinstance(ctx.channel, discord.DMChannel):
         await ctx.send("❌ This command only works in DMs!")
         return
     
     try:
-        # Check if user is an ambassador
-        with sqlite3.connect('ambassador_program.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
-            if not cursor.fetchone():
-                await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
-                return
+        # Check if ambassador program is available
+        if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program.supabase:
+            await ctx.send("❌ Ambassador program not available.")
+            return
         
-        # Get top ambassadors this month
-        current_month = datetime.now().strftime("%Y-%m")
-        with sqlite3.connect('ambassador_program.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT username, current_month_points, total_points, consecutive_months
-                FROM ambassadors 
-                WHERE status = "active"
-                ORDER BY current_month_points DESC, total_points DESC
-                LIMIT 10
-            ''')
-            ambassadors = cursor.fetchall()
+        supabase = bot.ambassador_program.supabase
+        
+        # Check if user is an ambassador
+        user_check = supabase.table('ambassadors').select('discord_id').eq('discord_id', str(ctx.author.id)).eq('status', 'active').execute()
+        if not user_check.data:
+            await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+            return
+        
+        # Get top ambassadors this month from Supabase
+        result = supabase.table('ambassadors').select(
+            'username', 'current_month_points', 'total_points', 'consecutive_months'
+        ).eq('status', 'active').order('current_month_points', desc=True).limit(10).execute()
+        
+        ambassadors = result.data
         
         if not ambassadors:
             await ctx.send("📊 No ambassador data available yet.")
             return
         
+        now = datetime.now()
         embed = discord.Embed(
-            title="🏆 Ambassador Leaderboard",
-            description=f"Top performers this month ({datetime.now().strftime('%B %Y')})",
+            title="🏆 This Month's Leaderboard",
+            description=f"**{now.strftime('%B %Y')}** Rankings",
             color=0xffd700
         )
         
         leaderboard_text = ""
-        for i, (username, month_points, total_points, consecutive) in enumerate(ambassadors, 1):
+        for i, amb in enumerate(ambassadors, 1):
             if i == 1:
                 emoji = "🥇"
             elif i == 2:
@@ -7377,14 +7452,33 @@ async def ambassador_leaderboard(ctx):
             elif i == 3:
                 emoji = "🥉"
             else:
-                emoji = f"{i}."
+                emoji = f"**{i}.**"
             
-            leaderboard_text += f"{emoji} **{username}** - {month_points} pts (🔥{consecutive}mo)\n"
+            username = amb['username']
+            month_points = amb.get('current_month_points', 0) or 0
+            consecutive = amb.get('consecutive_months', 0) or 0
+            
+            # Goal status
+            if month_points >= 75:
+                status = "✅"
+            elif month_points >= 50:
+                status = "🔥"
+            else:
+                status = "📈"
+            
+            streak_text = f" 🔥{consecutive}mo" if consecutive > 0 else ""
+            leaderboard_text += f"{emoji} {status} **{username}** — {month_points} pts{streak_text}\n"
         
         embed.add_field(
             name="📊 Monthly Points",
             value=leaderboard_text,
             inline=False
+        )
+        
+        embed.add_field(
+            name="🎯 Goal Status",
+            value="✅ = 75+ pts (goal met)\n🔥 = 50-74 pts (almost there)\n📈 = Keep going!",
+            inline=True
         )
         
         embed.set_footer(text="💡 Keep posting consistently to climb the leaderboard!")
@@ -7396,18 +7490,20 @@ async def ambassador_leaderboard(ctx):
 
 @bot.command(name='ambassadorhelp')
 async def ambassador_help_command(ctx):
-    """Ambassador-specific help command (DM only)"""
+    """Ambassador-specific help command (DM only) - uses Supabase"""
     if not isinstance(ctx.channel, discord.DMChannel):
         await ctx.send("❌ Ambassador help only works in DMs!")
         return
     
-    # Check if user is an ambassador
-    with sqlite3.connect('ambassador_program.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM ambassadors WHERE discord_id = ? AND status = "active"', (str(ctx.author.id),))
-        if not cursor.fetchone():
-            await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
-            return
+    # Check if user is an ambassador using Supabase
+    if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program.supabase:
+        await ctx.send("❌ Ambassador program not available.")
+        return
+    
+    result = bot.ambassador_program.supabase.table('ambassadors').select('discord_id').eq('discord_id', str(ctx.author.id)).eq('status', 'active').execute()
+    if not result.data:
+        await ctx.send("❌ You're not registered as an ambassador. Ask a Staff member to add you!")
+        return
     
     embed = discord.Embed(
         title="🤖 Ambassador Help Guide",

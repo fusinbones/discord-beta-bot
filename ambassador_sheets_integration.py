@@ -982,6 +982,126 @@ class AmbassadorSheetsManager:
         except Exception as e:
             logging.error(f"Error getting leaderboard: {e}")
             return []
+    
+    async def archive_month_leaderboard(self, month_year: str = None) -> bool:
+        """
+        Archive the current month's leaderboard to a monthly sheet.
+        Creates a sheet named like "Nov 2025" with final rankings.
+        Call this at end of month before resetting points.
+        """
+        try:
+            if not month_year:
+                month_year = datetime.now().strftime("%b %Y")  # e.g., "Nov 2025"
+            
+            token = await self.get_access_token()
+            if not token:
+                return False
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Create monthly archive sheet
+            url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}:batchUpdate"
+            body = {
+                "requests": [{
+                    "addSheet": {
+                        "properties": {
+                            "title": month_year,
+                            "gridProperties": {"rowCount": 100, "columnCount": 10}
+                        }
+                    }
+                }]
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=body) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        if "already exists" not in error_text.lower():
+                            logging.error(f"Failed to create monthly sheet: {error_text}")
+                            return False
+            
+            # Get current leaderboard data
+            leaderboard = await self.get_leaderboard_data(limit=50)
+            
+            if not leaderboard:
+                logging.warning("No leaderboard data to archive")
+                return True
+            
+            # Prepare archive data with headers
+            archive_data = [
+                ["Rank", "Username", "Discord ID", "Monthly Points", "Total Points", "Goal Met", "Archived Date"]
+            ]
+            
+            for i, amb in enumerate(leaderboard, 1):
+                goal_met = "✅ Yes" if amb['current_month_points'] >= 75 else "❌ No"
+                archive_data.append([
+                    i,
+                    amb['username'],
+                    amb['discord_id'],
+                    amb['current_month_points'],
+                    amb['total_points'],
+                    goal_met,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                ])
+            
+            # Write to monthly sheet
+            range_name = f"'{month_year}'!A1:G{len(archive_data)}"
+            write_body = {"values": archive_data}
+            
+            write_url = f"https://sheets.googleapis.com/v4/spreadsheets/{self.spreadsheet_id}/values/{range_name}"
+            params = {"valueInputOption": "USER_ENTERED"}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.put(write_url, headers=headers, params=params, json=write_body) as response:
+                    if response.status == 200:
+                        logging.info(f"✅ Archived {len(leaderboard)} ambassadors to '{month_year}' sheet")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logging.error(f"Failed to write archive: {error_text}")
+                        return False
+                        
+        except Exception as e:
+            logging.error(f"Error archiving month: {e}")
+            return False
+    
+    async def get_last_month_leaders(self, limit: int = 10) -> List[dict]:
+        """Get last month's top performers from the archived sheet"""
+        try:
+            # Calculate last month name
+            now = datetime.now()
+            if now.month == 1:
+                last_month = datetime(now.year - 1, 12, 1)
+            else:
+                last_month = datetime(now.year, now.month - 1, 1)
+            
+            last_month_name = last_month.strftime("%b %Y")  # e.g., "Oct 2025"
+            
+            # Read from last month's sheet
+            existing_data = await self.get_existing_sheet_data(f"'{last_month_name}'", "A:G")
+            
+            if not existing_data or len(existing_data) < 2:
+                return []
+            
+            leaders = []
+            for row in existing_data[1:limit+1]:  # Skip header, get top N
+                if len(row) >= 5:
+                    leaders.append({
+                        'rank': row[0],
+                        'username': row[1],
+                        'discord_id': row[2],
+                        'monthly_points': int(row[3]) if row[3] else 0,
+                        'total_points': int(row[4]) if row[4] else 0
+                    })
+            
+            return leaders
+            
+        except Exception as e:
+            logging.error(f"Error getting last month leaders: {e}")
+            return []
 
 
 class AmbassadorSheetsConfig:
