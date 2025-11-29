@@ -6555,22 +6555,228 @@ async def ambassador_leaderboard(ctx):
 
 @bot.command(name='ambassador-recover')
 @commands.has_any_role('Staff', 'Admin', 'Moderator')
-async def ambassador_recover(ctx, hours_back: int = 24):
-    """Recover lost ambassador data from chat history (Staff only)"""
+async def ambassador_recover(ctx, hours_back: int = 1440):
+    """Recover lost ambassador data from chat history (Staff only)
+    
+    Default: 1440 hours (2 months / 60 days)
+    Usage: !ambassador-recover [hours]
+    """
     try:
         if not hasattr(bot, 'ambassador_program') or not bot.ambassador_program:
             await ctx.send("❌ Ambassador program not initialized.")
             return
         
-        await ctx.send(f"🔄 Starting ambassador data recovery for the last {hours_back} hours...")
+        days = hours_back / 24
+        await ctx.send(f"🔄 Starting ambassador data recovery for the last {hours_back} hours (~{days:.1f} days)...\nThis may take a while for large time ranges.")
         
-        # Use the existing recovery method
-        await bot.ambassador_program.recover_submissions_from_chat_history(bot, hours_back)
+        # Use the bot's recovery method directly
+        await recover_submissions_from_chat_history(bot, hours_back)
         
         await ctx.send("✅ Ambassador data recovery complete! Check console for details.")
         
     except Exception as e:
         await ctx.send(f"❌ Error during recovery: {e}")
+
+async def recover_submissions_from_chat_history(bot_instance, hours_back: int = 1440):
+    """Recover ambassador submissions from chat history
+    
+    Args:
+        bot_instance: The bot instance
+        hours_back: Number of hours to look back (default 1440 = 60 days / 2 months)
+    """
+    try:
+        if not hasattr(bot_instance, 'ambassador_program') or not bot_instance.ambassador_program:
+            print("❌ Ambassador program not available for recovery")
+            return
+        
+        print(f"🔄 Starting ambassador chat history recovery for last {hours_back} hours...")
+        
+        # Find ambassador channels
+        ambassador_channels = []
+        for guild in bot_instance.guilds:
+            print(f"🔍 Scanning guild: {guild.name}")
+            for channel in guild.text_channels:
+                channel_name = channel.name.lower()
+                if any(keyword in channel_name for keyword in ['ambassador', 'content-creator', 'influencer']):
+                    ambassador_channels.append(channel)
+                    print(f"   ✅ Found ambassador channel: #{channel.name}")
+        
+        # Also scan DM channels with ambassadors
+        print("🔍 Checking for DM history with ambassadors...")
+        
+        print(f"📋 Total ambassador channels found: {len(ambassador_channels)}")
+        if not ambassador_channels:
+            print("⚠️ No ambassador channels found - checking all channels for debugging:")
+            for guild in bot_instance.guilds:
+                for channel in guild.text_channels:
+                    print(f"   - #{channel.name}")
+            return
+        
+        # Scan messages in ambassador channels
+        scanned_messages = 0
+        processed_submissions = 0
+        
+        # Calculate message limit based on hours (estimate ~10 messages per hour per channel)
+        message_limit = min(10000, max(500, hours_back * 10))
+        
+        for channel in ambassador_channels:
+            try:
+                print(f"📚 Scanning last {hours_back} hours of #{channel.name} (limit: {message_limit} messages)...")
+                
+                # Scan messages since cutoff time
+                cutoff_time = datetime.utcnow() - timedelta(hours=hours_back)
+                async for message in channel.history(limit=message_limit, after=cutoff_time):
+                    scanned_messages += 1
+                    
+                    # Progress update every 500 messages
+                    if scanned_messages % 500 == 0:
+                        print(f"   📊 Progress: {scanned_messages} messages scanned, {processed_submissions} new submissions...")
+                    
+                    # Skip bot messages
+                    if message.author.bot:
+                        continue
+                    
+                    # Check if message contains URLs or attachments
+                    has_url = any(word.startswith(('http://', 'https://')) for word in message.content.split())
+                    has_attachment = len(message.attachments) > 0
+                    
+                    if has_url or has_attachment:
+                        # Check if this is an ambassador using Supabase
+                        try:
+                            result = bot_instance.ambassador_program.supabase.table('ambassadors').select('discord_id', 'username').eq('discord_id', str(message.author.id)).eq('status', 'active').execute()
+                            
+                            if result.data:
+                                ambassador = result.data[0]
+                                ambassador_id = ambassador['discord_id']
+                                username = ambassador['username']
+                                
+                                # Process URLs
+                                if has_url:
+                                    urls = [word for word in message.content.split() if word.startswith(('http://', 'https://'))]
+                                    for url in urls:
+                                        # Create unique hash for duplicate detection
+                                        import hashlib
+                                        content_hash = hashlib.md5(f"{ambassador_id}_{url}".encode()).hexdigest()
+                                        
+                                        # Check if already in submissions table
+                                        existing = bot_instance.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
+                                        
+                                        if not existing.data:
+                                            # Determine platform and post type from URL
+                                            platform = bot_instance.detect_platform_from_url(url)
+                                            post_type = bot_instance.detect_post_type_from_url(url)
+                                            
+                                            # Calculate points
+                                            points = bot_instance.calculate_submission_points(platform, post_type)
+                                            
+                                            # Add to submissions table
+                                            submission_data = {
+                                                'ambassador_id': ambassador_id,
+                                                'platform': platform,
+                                                'post_type': post_type,
+                                                'url': url,
+                                                'screenshot_hash': content_hash,
+                                                'content_preview': message.content[:200],
+                                                'timestamp': message.created_at.isoformat(),
+                                                'points_awarded': points,
+                                                'is_duplicate': False,
+                                                'validity_status': 'accepted'
+                                            }
+                                            
+                                            try:
+                                                bot_instance.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
+                                                await bot_instance.update_ambassador_points(ambassador_id, points)
+                                                print(f"   ✅ Recovered URL: {username} - {platform} - {url[:50]}... (+{points} pts)")
+                                                processed_submissions += 1
+                                            except Exception as insert_error:
+                                                print(f"   ❌ Failed to insert URL: {insert_error}")
+                                
+                                # Process attachments (screenshots)
+                                if has_attachment:
+                                    for attachment in message.attachments:
+                                        if attachment.content_type and attachment.content_type.startswith('image/'):
+                                            import hashlib
+                                            unique_identifier = f"{attachment.filename}_{attachment.size}"
+                                            content_hash = hashlib.md5(f"{ambassador_id}_{unique_identifier}".encode()).hexdigest()
+                                            
+                                            existing = bot_instance.ambassador_program.supabase.table('submissions').select('id').eq('screenshot_hash', content_hash).execute()
+                                            
+                                            if not existing.data:
+                                                # Store image permanently if storage available
+                                                stored_image_url = attachment.url
+                                                storage_id = None
+                                                
+                                                if hasattr(bot_instance, 'image_storage') and bot_instance.image_storage:
+                                                    try:
+                                                        storage_result = await bot_instance.image_storage.store_discord_attachment(
+                                                            attachment.url, ambassador_id, content_hash[:8]
+                                                        )
+                                                        if storage_result['success']:
+                                                            stored_image_url = storage_result['stored_url']
+                                                            storage_id = storage_result.get('storage_id')
+                                                    except Exception as storage_error:
+                                                        print(f"   ⚠️ Image storage failed: {storage_error}")
+                                                
+                                                # Try AI analysis
+                                                platform = 'screenshot'
+                                                post_type = 'screenshot'
+                                                points = 0
+                                                
+                                                try:
+                                                    import aiohttp
+                                                    import base64
+                                                    async with aiohttp.ClientSession() as session:
+                                                        async with session.get(attachment.url) as resp:
+                                                            if resp.status == 200:
+                                                                image_data = await resp.read()
+                                                                base64_image = base64.b64encode(image_data).decode('utf-8')
+                                                                analysis = await bot_instance.analyze_ambassador_screenshot(base64_image)
+                                                                platform = analysis.get('platform', 'screenshot')
+                                                                post_type = analysis.get('post_type', 'screenshot')
+                                                                confidence = analysis.get('confidence', 0.0)
+                                                                appears_legitimate = analysis.get('appears_legitimate', False)
+                                                                if confidence > 0.7 and appears_legitimate:
+                                                                    points = bot_instance.calculate_submission_points(platform, post_type)
+                                                except Exception:
+                                                    pass  # Use defaults
+                                                
+                                                submission_data = {
+                                                    'ambassador_id': ambassador_id,
+                                                    'platform': platform,
+                                                    'post_type': post_type,
+                                                    'url': stored_image_url,
+                                                    'original_discord_url': attachment.url,
+                                                    'stored_image_id': storage_id,
+                                                    'screenshot_hash': content_hash,
+                                                    'content_preview': message.content[:200],
+                                                    'timestamp': message.created_at.isoformat(),
+                                                    'points_awarded': points,
+                                                    'is_duplicate': False,
+                                                    'validity_status': 'pending' if points == 0 else 'accepted'
+                                                }
+                                                
+                                                try:
+                                                    bot_instance.ambassador_program.supabase.table('submissions').insert(submission_data).execute()
+                                                    await bot_instance.update_ambassador_points(ambassador_id, points)
+                                                    print(f"   ✅ Recovered screenshot: {username} - {attachment.filename} (+{points} pts)")
+                                                    processed_submissions += 1
+                                                except Exception as insert_error:
+                                                    print(f"   ❌ Failed to insert screenshot: {insert_error}")
+                                                    
+                        except Exception as e:
+                            print(f"❌ Error processing message from {message.author.name}: {e}")
+                            continue
+            
+            except Exception as e:
+                print(f"❌ Error scanning channel {channel.name}: {e}")
+                continue
+        
+        print(f"✅ Ambassador recovery complete: {scanned_messages} messages scanned, {processed_submissions} new submissions recovered")
+        
+    except Exception as e:
+        print(f"❌ Error in ambassador recovery: {e}")
+        import traceback
+        traceback.print_exc()
 
 @bot.command(name='post-leaderboard')
 @commands.has_any_role('Staff', 'Admin', 'Moderator')
