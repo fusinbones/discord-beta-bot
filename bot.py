@@ -3452,7 +3452,7 @@ class BetaTestingBot(commands.Bot):
             # Run points audit before syncing to sheets
             await self.audit_and_fix_ambassador_points()
             
-            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '15j_SNfT22Eijzf-lmev8ilgowGbGQcKPzKblTQHUzE')
             if not spreadsheet_id:
                 return  # Skip if not configured
             
@@ -8039,7 +8039,7 @@ async def ambassadors_report(ctx, action=None):
                 return
             
             # Check for Google Sheets configuration - use the provided ambassador sheet
-            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '1zyGJupeR086ytKMQxtqHtP7UwlQ0redE-aze2RH-RdA')
+            spreadsheet_id = os.getenv('AMBASSADOR_SPREADSHEET_ID', '15j_SNfT22Eijzf-lmev8ilgowGbGQcKPzKblTQHUzE')
             credentials_path = 'config/google_service_account.json'
             
             if not spreadsheet_id:

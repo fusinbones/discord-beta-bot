@@ -280,11 +280,11 @@ class GoogleSheetsManager:
                 "Content-Type": "application/json"
             }
             
-            # Try multiple possible sheet names
+            # Try multiple possible sheet names - search from row 1 to catch all bugs
             possible_ranges = [
-                "Issue Log!A30:A",
-                "A30:A",  # Default sheet
-                "Sheet1!A30:A"
+                "Issue Log!A1:A",
+                "A1:A",  # Default sheet
+                "Sheet1!A1:A"
             ]
             
             values = None
@@ -312,25 +312,25 @@ class GoogleSheetsManager:
             
             print(f"📋 Searching {len(values)} rows for bug #{bug_id}")
             
-            # Debug: Show first few and last few bug IDs found
+            # Debug: Show first few bug IDs found
             sample_bugs = []
-            for idx, row_data in enumerate(values[:5]):
+            for idx, row_data in enumerate(values[:10]):
                 if row_data and len(row_data) > 0:
-                    sample_bugs.append(f"Row {idx+30}: '{row_data[0]}'")
-            print(f"📝 Sample data (first 5): {sample_bugs}")
+                    sample_bugs.append(f"Row {idx+1}: '{row_data[0]}'")
+            print(f"📝 Sample data (first 10): {sample_bugs}")
             
-            # Search for the bug ID in column A
+            # Search for the bug ID in column A (starting from row 1)
             for row_idx, row_data in enumerate(values):
                 if row_data and len(row_data) > 0:
                     cell_content = str(row_data[0]).strip()
                     # Match exact bug ID (convert to int for comparison)
                     try:
                         if int(cell_content) == bug_id:
-                            actual_row = row_idx + 30
+                            actual_row = row_idx + 1  # Row numbers are 1-based
                             print(f"✅ Found bug #{bug_id} at row {actual_row}")
-                            return actual_row  # Return actual row number (30-based)
+                            return actual_row
                     except (ValueError, TypeError):
-                        # Skip non-numeric values
+                        # Skip non-numeric values (headers, etc.)
                         continue
             
             print(f"⚠️ Bug #{bug_id} not found in {len(values)} rows")
