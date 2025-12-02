@@ -37,9 +37,16 @@ class GoogleSheetsManager:
     async def get_access_token(self):
         """Get OAuth2 access token using service account credentials"""
         try:
-            # Load service account credentials
-            with open(self.credentials_path, 'r') as f:
-                credentials = json.load(f)
+            # Load service account credentials - try environment variable first, then file
+            credentials_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+            if credentials_json:
+                credentials = json.loads(credentials_json)
+            elif os.path.exists(self.credentials_path):
+                with open(self.credentials_path, 'r') as f:
+                    credentials = json.load(f)
+            else:
+                logging.error(f"No credentials found: set GOOGLE_SERVICE_ACCOUNT_JSON env var or provide {self.credentials_path}")
+                return None
             
             # Create JWT token for service account authentication
             now = int(time.time())

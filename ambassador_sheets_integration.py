@@ -49,9 +49,16 @@ class AmbassadorSheetsManager:
             if self.access_token and time.time() < self.token_expires - 300:  # 5 min buffer
                 return self.access_token
             
-            # Load service account credentials
-            with open(self.credentials_path, 'r') as f:
-                credentials = json.load(f)
+            # Load service account credentials - try environment variable first, then file
+            credentials_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+            if credentials_json:
+                credentials = json.loads(credentials_json)
+            elif os.path.exists(self.credentials_path):
+                with open(self.credentials_path, 'r') as f:
+                    credentials = json.load(f)
+            else:
+                logging.error(f"No credentials found: set GOOGLE_SERVICE_ACCOUNT_JSON env var or provide {self.credentials_path}")
+                return None
             
             # Create JWT token for service account authentication
             now = int(time.time())
